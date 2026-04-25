@@ -6,54 +6,49 @@
 
 ## Overview
 
-<!--
-Document your project's component conventions here.
-
-Questions to answer:
-- What component patterns do you use?
-- How are props defined?
-- How do you handle composition?
-- What accessibility standards apply?
--->
-
-(To be filled by the team)
+Frontend components must be simple, accessible, and aligned with the planned dorm electricity workflows.
 
 ---
 
 ## Component Structure
 
-<!-- Standard structure of a component file -->
-
-(To be filled by the team)
+- Keep components focused on one responsibility.
+- Put data loading in hooks or page-level containers; keep presentational components mostly prop-driven.
+- Extract repeated form fields only after duplication is clear.
+- Keep chart data transformation separate from chart rendering.
 
 ---
 
 ## Props Conventions
 
-<!-- How props should be defined and typed -->
-
-(To be filled by the team)
+- Props should describe domain intent, not implementation details.
+- Prefer explicit handler names such as `onScheduleSave`, `onRoomSelected`, and `onAlertConfigChange`.
+- Components that render remote data must accept loading, empty, and error states.
 
 ---
 
 ## Styling Patterns
 
-<!-- How styles are applied (CSS modules, styled-components, Tailwind, etc.) -->
+No styling framework has been selected yet. Once selected, document it here. Until then:
 
-(To be filled by the team)
+- Keep layout responsive for common desktop and mobile widths.
+- Use consistent spacing and form grouping.
+- Make status, validation, and threshold warnings visually clear.
 
 ---
 
 ## Accessibility
 
-<!-- A11y requirements and patterns -->
-
-(To be filled by the team)
+- Every input must have a label.
+- Validation errors must be associated with the relevant input.
+- Buttons must describe the action clearly.
+- Charts must provide a text/table fallback or summary of latest value and trend.
 
 ---
 
 ## Common Mistakes
 
-<!-- Component-related mistakes your team has made -->
-
-(To be filled by the team)
+- Combining all forms and chart rendering in one component.
+- Hiding empty states when no scheduled reading exists yet.
+- Making threshold warnings depend on color alone.
+- Forgetting mobile layout for schedule and alert forms.

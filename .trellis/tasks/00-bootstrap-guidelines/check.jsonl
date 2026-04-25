@@ -1,0 +1,4 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/skills/trellis-check/SKILL.md", "reason": "Code quality check spec"}
+{"file": ".trellis/spec/backend/", "type": "directory", "reason": "Verify backend guidelines are filled"}
+{"file": ".trellis/spec/frontend/", "type": "directory", "reason": "Verify frontend guidelines are filled"}

@@ -4,48 +4,59 @@
 
 ---
 
-## Overview
+## Current Project State
 
-<!--
-Document your project's database conventions here.
+No application database layer exists yet. The planned product requires durable storage for room selections, schedules, electricity readings, alert settings, and alert delivery state.
 
-Questions to answer:
-- What ORM/query library do you use?
-- How are migrations managed?
-- What are the naming conventions for tables/columns?
-- How do you handle transactions?
--->
+---
 
-(To be filled by the team)
+## Data Ownership
+
+Required logical entities:
+
+```text
+RoomSelection
+ScheduleConfig
+ElectricityReading
+AlertConfig
+AlertDeliveryState
+CollectionFailureLog
+```
+
+Persist data needed across process restarts. Keep transient login/session material minimal and protected.
 
 ---
 
 ## Query Patterns
 
-<!-- How should queries be written? Batch operations? -->
-
-(To be filled by the team)
+- Access storage through repository/data-access functions, not from route handlers.
+- Use timestamp plus measured value as the primary chart data shape.
+- Add date-range filtering before history can grow large.
+- Store timestamps with timezone awareness.
+- Treat schedule updates atomically so duplicate active jobs are not created.
 
 ---
 
 ## Migrations
 
-<!-- How to create and run migrations -->
-
-(To be filled by the team)
+- Use versioned migrations after a database tool is selected.
+- Include upgrade paths and downgrades when supported.
+- Do not edit already-applied migrations after they are shared.
+- Never embed secrets or environment-specific values in migrations.
 
 ---
 
 ## Naming Conventions
 
-<!-- Table names, column names, index names -->
-
-(To be filled by the team)
+- Prefer domain table names: `room_selections`, `schedule_configs`, `electricity_readings`, `alert_configs`.
+- Use explicit timestamp columns: `created_at`, `updated_at`, `collected_at`, `last_alert_sent_at`.
+- Use explicit numeric value names such as `balance_amount` or `electricity_value`.
 
 ---
 
 ## Common Mistakes
 
-<!-- Database-related mistakes your team has made -->
-
-(To be filled by the team)
+- Storing plaintext passwords or raw session cookies without a secured design.
+- Storing chart data only in memory.
+- Failing to deduplicate alert sends for the same below-threshold condition.
+- Mixing server timezone, user schedule timezone, and collection timestamps without normalization.
