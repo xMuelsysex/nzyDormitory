@@ -1,0 +1,28 @@
+{
+  "id": "dorm-electricity-auth-room",
+  "name": "dorm-electricity-auth-room",
+  "title": "Implement login and dorm room selection",
+  "description": "Campus portal login flow and dorm building/room selection used by monitoring jobs.",
+  "status": "planning",
+  "dev_type": "fullstack",
+  "scope": "auth-room",
+  "package": null,
+  "priority": "P1",
+  "creator": "Muelsyse",
+  "assignee": "Muelsyse",
+  "createdAt": "2026-04-26",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "04-26-dorm-electricity-monitor",
+  "relatedFiles": [
+    "task.md"
+  ],
+  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "meta": {}
+}
