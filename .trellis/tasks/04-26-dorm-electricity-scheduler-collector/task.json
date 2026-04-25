@@ -3,7 +3,7 @@
   "name": "dorm-electricity-scheduler-collector",
   "title": "Implement scheduled electricity data collection",
   "description": "Scheduled polling and persistence of dorm electricity readings inside user-configured active windows.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "backend",
   "scope": "scheduler-collector",
   "package": null,
@@ -21,8 +21,9 @@
   "children": [],
   "parent": "04-26-dorm-electricity-monitor",
   "relatedFiles": [
-    "task.md"
+    "backend/app/scheduler/collection_scheduler.py",
+    "backend/app/persistence/repository.py"
   ],
-  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "notes": "Implemented as part of initial dorm-electricity-monitor full-stack pass.",
   "meta": {}
 }

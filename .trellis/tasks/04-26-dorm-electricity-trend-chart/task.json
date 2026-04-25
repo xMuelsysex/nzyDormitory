@@ -3,7 +3,7 @@
   "name": "dorm-electricity-trend-chart",
   "title": "Implement electricity trend visualization",
   "description": "Trend chart UI for sampled electricity/balance history.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "frontend",
   "scope": "trend-chart",
   "package": null,
@@ -21,8 +21,9 @@
   "children": [],
   "parent": "04-26-dorm-electricity-monitor",
   "relatedFiles": [
-    "task.md"
+    "frontend/src/app.js",
+    "frontend/src/styles.css"
   ],
-  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "notes": "Implemented as part of initial dorm-electricity-monitor full-stack pass.",
   "meta": {}
 }
