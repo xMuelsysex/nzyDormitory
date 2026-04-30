@@ -59,11 +59,13 @@ When frontend code exists, test form validation, room selection flow, schedule s
 Frontend features must call these logical API operations through a centralized API layer:
 
 ```text
-login(credentials)
-saveRoomSelection(selection)
-saveScheduleConfig(config)
-listElectricityReadings(filter)
-saveAlertConfig(config)
+navigateToPortalLogin()
+getStatus()
+saveRoomSelection(selection) -> POST /api/room-selection
+saveScheduleConfig(config) -> POST /api/schedule-config
+listElectricityReadings() -> GET /api/readings
+saveAlertConfig(config) -> POST /api/alert-config
+runCollectionOnce() -> POST /api/collection/run-once
 ```
 
 ### 3. Contracts
@@ -127,3 +129,71 @@ Page container -> feature components -> hooks -> centralized API layer
 ```
 
 Components remain focused and receive clear props for data, loading, errors, and actions.
+
+---
+
+## Scenario: Proxied Campus Login UI Contract
+
+### 1. Scope / Trigger
+
+- Trigger: users must authenticate on the real campus login page, not in an app-owned credential form.
+- Applies when editing login UI, session-expired UI, or `/portal/login` navigation.
+
+### 2. Signatures
+
+Frontend navigation:
+
+```text
+<a href="/portal/login">进入校园门户登录</a>
+```
+
+Backend browser flow:
+
+```text
+GET  /portal/login -> rewritten campus login HTML
+POST /portal/login -> 303 /?login=success only after successful upstream login
+```
+
+### 3. Contracts
+
+- The app UI must not render campus username/password inputs.
+- The app UI must provide a clear button/link to `/portal/login`.
+- After returning with `?login=success`, the UI may show a success message and refresh status.
+- Failed login must remain on the proxied campus login page; the app UI should not display false success.
+- The UI must not store passwords, cookies, or copied portal session data.
+
+### 4. Validation & Error Matrix
+
+| Condition | UI behavior |
+|---|---|
+| User has not logged in | Show `/portal/login` action |
+| `?login=success` present | Show local success message and refresh status |
+| Campus login fails | No app return; user stays on proxy login page |
+| Later session expires | Show login action again |
+
+### 5. Good/Base/Bad Cases
+
+- Good: user clicks the login button, completes campus authentication, returns to the app, and continues room selection.
+- Base: user mistypes credentials; they stay on the campus login page and retry.
+- Bad: app asks for campus credentials directly or accepts pasted Cookie headers in the UI.
+
+### 6. Tests Required
+
+- Static/UI: home page contains link to `/portal/login` and no campus password field.
+- JS syntax: app script handles `?login=success` without breaking initial status refresh.
+- Manual authorized: completed campus login returns to app and status becomes authenticated.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```html
+<input name="username" />
+<input name="password" type="password" />
+```
+
+#### Correct
+
+```html
+<a class="button-link" href="/portal/login">进入校园门户登录</a>
+```

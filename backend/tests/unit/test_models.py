@@ -21,3 +21,7 @@ class ModelValidationTests(unittest.TestCase):
     def test_alert_requires_valid_email(self):
         with self.assertRaises(ValidationError):
             AlertConfig.from_payload({'threshold': 10, 'recipientEmail': 'bad-email'})
+
+    def test_alert_requires_integer_cooldown(self):
+        with self.assertRaises(ValidationError):
+            AlertConfig.from_payload({'threshold': 10, 'recipientEmail': 'ops@example.test', 'cooldownSeconds': 'soon'})

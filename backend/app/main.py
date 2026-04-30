@@ -12,7 +12,7 @@ from backend.app.integrations.campus_portal import CampusPortalClient
 from backend.app.persistence.repository import Repository
 from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.services.monitor_service import MonitorService
-from backend.app.shared.http import read_json_body, send_error, send_json
+from backend.app.shared.http import read_form_body, read_json_body, send_bytes, send_error, send_html, send_json, send_redirect
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ portal = CampusPortalClient(settings)
 alert_service = EmailAlertService(settings, repository)
 scheduler = CollectionScheduler(repository, portal, alert_service, settings.zoneinfo)
 service = MonitorService(repository, portal, scheduler)
-FRONTEND_DIR = Path(__file__).resolve().parents[2].parent / "frontend" / "src"
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "src"
 
 
 class DormElectricityHandler(BaseHTTPRequestHandler):
@@ -34,6 +34,14 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
                 send_json(self, 200, service.status())
             elif path == "/api/readings":
                 send_json(self, 200, service.readings())
+            elif path == "/portal/login":
+                send_html(self, 200, portal.load_login_page())
+            elif path == "/portal/proxy":
+                body, content_type = portal.fetch_proxy_resource(self.path)
+                send_bytes(self, 200, body, content_type)
+            elif path.startswith("/portal/"):
+                body, content_type = portal.fetch_portal_path(path)
+                send_bytes(self, 200, body, content_type)
             else:
                 self._serve_static(path)
         except Exception as exc:
@@ -42,10 +50,15 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             path = urlparse(self.path).path
+            if path == "/portal/login":
+                success, html_body = portal.submit_login_page(read_form_body(self))
+                if success:
+                    send_redirect(self, "/?login=success")
+                else:
+                    send_html(self, 200, html_body)
+                return
             payload = read_json_body(self)
-            if path == "/api/login":
-                send_json(self, 200, service.login(str(payload.get("username", "")), str(payload.get("password", ""))))
-            elif path == "/api/room-selection":
+            if path == "/api/room-selection":
                 send_json(self, 200, service.save_room(payload))
             elif path == "/api/schedule-config":
                 send_json(self, 200, service.save_schedule(payload))

@@ -72,7 +72,8 @@ label.inline {
   font-weight: 500;
 }
 
-input {
+input,
+textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -80,7 +81,13 @@ input {
   font: inherit;
 }
 
-button {
+textarea {
+  resize: vertical;
+}
+
+button,
+.button-link {
+  display: inline-block;
   border: 0;
   border-radius: 12px;
   padding: 11px 16px;
@@ -89,9 +96,17 @@ button {
   font-weight: 700;
   cursor: pointer;
   margin: 8px 8px 0 0;
+  text-decoration: none;
 }
 
-button.secondary {
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+button.secondary,
+.button-link.secondary {
   background: #e2e8f0;
   color: #0f172a;
 }

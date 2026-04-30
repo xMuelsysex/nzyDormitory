@@ -39,7 +39,8 @@
     "04-26-dorm-electricity-auth-room",
     "04-26-dorm-electricity-scheduler-collector",
     "04-26-dorm-electricity-trend-chart",
-    "04-26-dorm-electricity-email-alerts"
+    "04-26-dorm-electricity-email-alerts",
+    "04-26-dorm-electricity-portal-research"
   ],
   "parent": null,
   "relatedFiles": [

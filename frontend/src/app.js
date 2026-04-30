@@ -26,6 +26,11 @@ const chartSummary = document.querySelector('#chartSummary');
 const readingsBody = document.querySelector('#readingsBody');
 const canvas = document.querySelector('#trendCanvas');
 const ctx = canvas.getContext('2d');
+const roomForm = document.querySelector('#roomForm');
+const scheduleForm = document.querySelector('#scheduleForm');
+const alertForm = document.querySelector('#alertForm');
+const runOnceButton = document.querySelector('#runOnceButton');
+const refreshButton = document.querySelector('#refreshButton');
 
 function formData(form) {
   const data = new FormData(form);
@@ -47,6 +52,8 @@ async function refreshStatus() {
   const parts = [status.authenticated ? '已登录' : '未登录'];
   if (status.roomSelection) parts.push(`${status.roomSelection.building} ${status.roomSelection.room}`);
   statusBadge.textContent = parts.join(' · ');
+  applySavedConfig(status);
+  updateControlStates(status);
 }
 
 async function refreshReadings() {
@@ -120,42 +127,105 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 }
 
-document.querySelector('#loginForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  try {
-    await api.post('/api/login', formData(event.currentTarget));
-    setMessage('#loginMessage', '登录成功，请继续选择宿舍。');
-    await refreshStatus();
-  } catch (error) {
-    setMessage('#loginMessage', error.message, true);
+function applySavedConfig(status) {
+  if (status.roomSelection) {
+    roomForm.elements.building.value = status.roomSelection.building;
+    roomForm.elements.room.value = status.roomSelection.room;
   }
-});
+  if (status.scheduleConfig) {
+    scheduleForm.elements.intervalSeconds.value = status.scheduleConfig.intervalSeconds;
+    scheduleForm.elements.startTime.value = status.scheduleConfig.startTime;
+    scheduleForm.elements.endTime.value = status.scheduleConfig.endTime;
+    scheduleForm.elements.enabled.checked = Boolean(status.scheduleConfig.enabled);
+  }
+  if (status.alertConfig) {
+    alertForm.elements.threshold.value = status.alertConfig.threshold;
+    alertForm.elements.recipientEmail.value = status.alertConfig.recipientEmail;
+    alertForm.elements.cooldownSeconds.value = status.alertConfig.cooldownSeconds;
+    alertForm.elements.enabled.checked = Boolean(status.alertConfig.enabled);
+  }
+}
 
-document.querySelector('#roomForm').addEventListener('submit', async (event) => {
+function updateControlStates(status) {
+  const loginRequired = !status.authenticated;
+  const roomRequired = !status.roomSelection;
+  setFormDisabled(roomForm, loginRequired);
+  setFormDisabled(scheduleForm, loginRequired || roomRequired);
+  setFormDisabled(alertForm, loginRequired);
+  runOnceButton.disabled = loginRequired || roomRequired;
+  if (loginRequired) {
+    setMessage('#roomMessage', '请先完成校园门户登录。', true);
+    setMessage('#scheduleMessage', '登录并选择宿舍后才能配置定时采集。', true);
+    setMessage('#alertMessage', '登录后才能配置邮件提醒。', true);
+    return;
+  }
+  if (roomRequired) {
+    setMessage('#roomMessage', '');
+    setMessage('#scheduleMessage', '选择宿舍后才能配置定时采集。', true);
+  }
+}
+
+function setFormDisabled(form, disabled) {
+  for (const control of form.querySelectorAll('input, button')) {
+    control.disabled = disabled;
+  }
+}
+
+function validateSchedulePayload(payload) {
+  const intervalSeconds = Number(payload.intervalSeconds);
+  if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) {
+    throw new Error('间隔秒数必须是正整数。');
+  }
+  if (!payload.startTime || !payload.endTime || payload.startTime >= payload.endTime) {
+    throw new Error('开始时间必须早于结束时间。');
+  }
+}
+
+function validateAlertPayload(payload) {
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(payload.recipientEmail || '')) {
+    throw new Error('提醒邮箱格式不正确。');
+  }
+  if (!Number.isFinite(Number(payload.threshold))) {
+    throw new Error('阈值必须是数字。');
+  }
+}
+
+const loginMessage = document.querySelector('#loginMessage');
+if (loginMessage && new URLSearchParams(window.location.search).get('login') === 'success') {
+  setMessage('#loginMessage', '校园门户登录成功，请继续选择宿舍。');
+}
+
+roomForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     await api.post('/api/room-selection', formData(event.currentTarget));
     setMessage('#roomMessage', '宿舍已保存。');
     await refreshStatus();
+    setMessage('#scheduleMessage', '');
   } catch (error) {
     setMessage('#roomMessage', error.message, true);
   }
 });
 
-document.querySelector('#scheduleForm').addEventListener('submit', async (event) => {
+scheduleForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await api.post('/api/schedule-config', formData(event.currentTarget));
+    const payload = formData(event.currentTarget);
+    validateSchedulePayload(payload);
+    await api.post('/api/schedule-config', payload);
     setMessage('#scheduleMessage', '定时设置已保存。');
+    await refreshStatus();
   } catch (error) {
     setMessage('#scheduleMessage', error.message, true);
   }
 });
 
-document.querySelector('#alertForm').addEventListener('submit', async (event) => {
+alertForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await api.post('/api/alert-config', formData(event.currentTarget));
+    const payload = formData(event.currentTarget);
+    validateAlertPayload(payload);
+    await api.post('/api/alert-config', payload);
     setMessage('#alertMessage', '提醒设置已保存。');
     await refreshStatus();
   } catch (error) {
@@ -163,7 +233,7 @@ document.querySelector('#alertForm').addEventListener('submit', async (event) =>
   }
 });
 
-document.querySelector('#runOnceButton').addEventListener('click', async () => {
+runOnceButton.addEventListener('click', async () => {
   try {
     await api.post('/api/collection/run-once', {});
     setMessage('#scheduleMessage', '已完成一次采集。');
@@ -173,7 +243,7 @@ document.querySelector('#runOnceButton').addEventListener('click', async () => {
   }
 });
 
-document.querySelector('#refreshButton').addEventListener('click', refreshReadings);
+refreshButton.addEventListener('click', refreshReadings);
 
 refreshStatus().catch(() => { statusBadge.textContent = '状态加载失败'; });
 refreshReadings().catch(() => { chartSummary.textContent = '趋势数据加载失败。'; });

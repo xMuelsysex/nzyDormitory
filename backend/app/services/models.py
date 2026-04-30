@@ -78,7 +78,10 @@ class AlertConfig:
         recipient_email = str(payload.get("recipientEmail", "")).strip()
         if not EMAIL_RE.match(recipient_email):
             raise ValidationError("Recipient email is invalid.")
-        cooldown_seconds = int(payload.get("cooldownSeconds", 3600) or 3600)
+        try:
+            cooldown_seconds = int(payload.get("cooldownSeconds", 3600) or 3600)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Cooldown must be an integer.") from exc
         if cooldown_seconds < 0:
             raise ValidationError("Cooldown cannot be negative.")
         return cls(

@@ -1,0 +1,5 @@
+{"file":".claude/skills/trellis-check/SKILL.md","reason":"Quality gate and spec sync requirements"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend portal integration contracts and test expectations"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Safe error handling and no-secret response rules"}
+{"file":"backend/tests/unit/test_campus_portal.py","reason":"Regression tests proving invalid login and electricity parsing behavior"}
+{"file":".trellis/tasks/04-26-dorm-electricity-portal-research/research-findings.jsonl","reason":"Verify implementation changes are backed by sanitized source portal evidence"}

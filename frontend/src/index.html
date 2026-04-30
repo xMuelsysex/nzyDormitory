@@ -18,14 +18,12 @@
       </header>
 
       <section class="grid">
-        <form id="loginForm" class="card">
+        <div class="card">
           <h2>1. 登录</h2>
-          <p class="hint">登录请求会发送到后端，由后端访问校园门户。</p>
-          <label>账号<input name="username" autocomplete="username" required /></label>
-          <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
-          <button type="submit">登录校园门户</button>
+          <p class="hint">点击按钮进入校园门户登录页完成鉴权；登录成功后会自动回到本页面，失败则停留在校园登录页。</p>
+          <a class="button-link" href="/portal/login">进入校园门户登录</a>
           <p id="loginMessage" class="message"></p>
-        </form>
+        </div>
 
         <form id="roomForm" class="card">
           <h2>2. 选择宿舍</h2>

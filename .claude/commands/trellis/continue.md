@@ -31,7 +31,7 @@ Compare the task's `prd.md` + recent activity against the Phase Index:
 Phase rules (full detail in `.trellis/workflow.md`):
 
 1. Run steps **in order** within a phase — `[required]` steps must not be skipped
-2. `[once]` steps are already done if the output exists (e.g., `prd.md`, `implement.jsonl`) — skip them
+2. `[once]` steps are already done if the output exists (e.g., `prd.md` for 1.1; `implement.jsonl` with curated entries for 1.3) — skip them
 3. You may go back to an earlier phase if discoveries require it
 
 ## Step 4: Load the Specific Step
@@ -39,7 +39,7 @@ Phase rules (full detail in `.trellis/workflow.md`):
 Once you know which step to resume at:
 
 ```bash
-python ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform {{CLI_FLAG}}
+python ./.trellis/scripts/get_context.py --mode phase --step <X.X> --platform claude
 ```
 
 Follow the loaded instructions. After each `[required]` step completes, move to the next.

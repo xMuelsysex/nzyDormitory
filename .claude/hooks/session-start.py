@@ -3,6 +3,7 @@
 """
 Session Start Hook - Inject structured context
 """
+from __future__ import annotations
 
 # IMPORTANT: Suppress all warnings FIRST
 import warnings
@@ -15,15 +16,44 @@ import sys
 from io import StringIO
 from pathlib import Path
 
+FIRST_REPLY_NOTICE = """<first-reply-notice>
+On the first visible assistant reply in this session, begin with exactly one short Chinese sentence:
+Trellis SessionStart 已注入：workflow、当前任务状态、开发者身份、git 状态、active tasks、spec 索引已加载。
+Then continue directly with the user's request. This notice is one-shot: do not repeat it after the first assistant reply in the same session.
+</first-reply-notice>"""
+
 # IMPORTANT: Force stdout to use UTF-8 on Windows
 # This fixes UnicodeEncodeError when outputting non-ASCII characters
-if sys.platform == "win32":
+if sys.platform.startswith("win"):
     import io as _io
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     elif hasattr(sys.stdout, "detach"):
         sys.stdout = _io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+
+
+def _has_curated_jsonl_entry(jsonl_path: Path) -> bool:
+    """Return True iff jsonl has at least one row with a ``file`` field.
+
+    A freshly seeded jsonl only contains a ``{"_example": ...}`` row (no
+    ``file`` key) — that is NOT "ready". Readiness requires at least one
+    curated entry. Matches the contract used by ``inject-subagent-context.py``.
+    """
+    try:
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict) and row.get("file"):
+                return True
+    except (OSError, UnicodeDecodeError):
+        return False
+    return False
 
 
 def should_skip_injection() -> bool:
@@ -118,7 +148,11 @@ def _get_task_status(trellis_dir: Path) -> str:
         return (
             "Status: NO ACTIVE TASK\n"
             "Next-Action: After the user describes their intent, load skill `trellis-brainstorm` "
-            "to clarify requirements and create a task via `python3 ./.trellis/scripts/task.py create`."
+            "to clarify requirements and create a task via `python3 ./.trellis/scripts/task.py create`.\n"
+            "Research reminder: for research-heavy tasks (comparing tools, reading external docs, "
+            "cross-platform surveys), spawn `trellis-research` sub-agents via the Task tool — "
+            "they persist findings to `{TASK_DIR}/research/*.md` and keep main context clean. "
+            "Do NOT do 10+ inline WebFetch/WebSearch in the main conversation."
         )
 
     task_ref = _normalize_task_ref(current_task_file.read_text(encoding="utf-8").strip())
@@ -159,15 +193,34 @@ def _get_task_status(trellis_dir: Path) -> str:
         return (
             f"Status: PLANNING\nTask: {task_title}\n"
             "Next-Action: Load skill `trellis-brainstorm` to clarify requirements with the user "
-            "and produce prd.md in the task directory."
+            "and produce prd.md in the task directory.\n"
+            "Research reminder: when the task needs external research (tool comparison, docs, "
+            "conventions survey), spawn `trellis-research` sub-agents — don't WebFetch/WebSearch "
+            "inline in the main session. Findings go to `{task_dir}/research/*.md`; PRD only links to them."
         )
 
-    # Case 5: PRD ready — enter Execute phase
+    # Case 4b: PRD exists but implement.jsonl has only seed (no curated entries) — Phase 1.3 gate
+    implement_jsonl = task_dir / "implement.jsonl"
+    if implement_jsonl.is_file() and not _has_curated_jsonl_entry(implement_jsonl):
+        return (
+            f"Status: PLANNING (Phase 1.3)\nTask: {task_title}\n"
+            "Next-Action: Curate `implement.jsonl` and `check.jsonl` with the spec + research files "
+            "the Phase 2 sub-agents will need. Only spec paths (`.trellis/spec/**/*.md`) and research "
+            "files (`{TASK_DIR}/research/*.md`) — no code paths. Run "
+            "`python3 ./.trellis/scripts/get_context.py --mode packages` to list available specs, "
+            "then edit the jsonl files or use `python3 ./.trellis/scripts/task.py add-context`. "
+            "See `.trellis/workflow.md` Phase 1.3 for details."
+        )
+
+    # Case 5: PRD + curated jsonl (or agent-less platform with no jsonl) — enter Execute phase
     return (
         f"Status: READY\nTask: {task_title}\n"
-        "Next-Action: Load skill `trellis-before-dev` to read relevant specs, "
-        "then spawn `implement` sub-agent via the Task tool. "
-        "After implementation, spawn `check` sub-agent for quality verification."
+        "Next required action: dispatch `trellis-implement` per Phase 2.1. "
+        "For agent-capable platforms, do NOT edit code in the main session. "
+        "After implementation, dispatch `trellis-check` per Phase 2.2 before reporting completion.\n"
+        "Sub-agent roster: `trellis-implement` (writes code), `trellis-check` (verifies + self-fixes), "
+        "`trellis-research` (persists findings to `research/*.md` — use when you'd otherwise do "
+        "multiple WebFetch/WebSearch inline)."
     )
 
 
@@ -421,6 +474,8 @@ Read and follow all instructions below carefully.
 </session-context>
 
 """)
+    output.write(FIRST_REPLY_NOTICE)
+    output.write("\n\n")
 
     # Legacy migration warning
     legacy_warning = _check_legacy_spec(trellis_dir, is_mono, packages)
@@ -444,8 +499,9 @@ Read and follow all instructions below carefully.
         "- If you're spawning an implement/check sub-agent, context is injected "
         "automatically via `{task}/implement.jsonl` / `check.jsonl`. You do NOT "
         "need to read these indexes yourself.\n"
-        "- If you're editing code directly in the main session, Read the relevant "
-        "index(es) on-demand and follow their Pre-Dev Checklist.\n\n"
+        "- For agent-capable platforms, do NOT edit code directly in the main "
+        "session; dispatch `trellis-implement` and `trellis-check` so JSONL "
+        "context is loaded by the sub-agents.\n\n"
     )
 
     # guides/ is cross-package thinking — always include inline (small, broadly useful)
@@ -502,8 +558,8 @@ Read and follow all instructions below carefully.
 
     output.write("""<ready>
 Context loaded. Workflow index, project state, and guidelines are already injected above — do NOT re-read them.
-Wait for the user's first message, then handle it following the workflow guide.
-If there is an active task, ask whether to continue it.
+When the user sends the first message, follow <task-status> and the workflow guide.
+If a task is READY, execute its Next required action without asking whether to continue.
 </ready>""")
 
     result = {
