@@ -19,7 +19,7 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "04-26-dorm-electricity-monitor",
+  "parent": null,
   "relatedFiles": [
     "backend/app/scheduler/collection_scheduler.py",
     "backend/app/persistence/repository.py"
