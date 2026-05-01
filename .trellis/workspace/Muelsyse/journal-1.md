@@ -132,3 +132,36 @@ Completed Trellis execution, checked dorm electricity monitor flow, updated spec
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Fix campus portal login and electricity reading
+
+**Date**: 2026-05-01
+**Task**: Fix campus portal login and electricity reading
+**Branch**: `feature/dorm-electricity-monitor`
+
+### Summary
+
+Fixed campus portal login success detection, implemented real FeeElect WebForms query for dorm electricity balance, verified browser E2E for C20/2324, and passed ruff, mypy, and unit tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9a7b52c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
