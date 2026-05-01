@@ -4,8 +4,10 @@ from http.cookiejar import CookieJar
 from backend.app.integrations.campus_portal import (
     CampusPortalClient,
     build_login_submission,
+    build_fee_elect_query_fields,
     diagnose_portal_response,
     import_cookie_header,
+    map_fee_elect_room_fields,
     parse_electricity_value,
     proxy_target_from_path,
     rewrite_css_urls,
@@ -14,6 +16,61 @@ from backend.app.integrations.campus_portal import (
 from backend.app.config.settings import Settings
 from pathlib import Path
 from backend.app.shared.errors import PortalParseError
+from backend.app.services.models import RoomSelection
+
+
+class FakePortalResponse:
+    def __init__(self, body, url='http://portal.test/Account.aspx'):
+        self._body = body.encode('utf-8')
+        self.url = url
+        self.headers = self
+
+    def get_content_charset(self):
+        return 'utf-8'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class FakePortalOpener:
+    def __init__(self, body):
+        self.body = body
+
+    def open(self, request, timeout=15):
+        return FakePortalResponse(self.body)
+
+
+class FakeSequenceOpener:
+    def __init__(self, bodies):
+        self.bodies = list(bodies)
+        self.requests = []
+
+    def open(self, request, timeout=15):
+        self.requests.append(request)
+        return FakePortalResponse(self.bodies.pop(0), url=getattr(request, 'full_url', 'http://portal.test/Web/Student/FeeElect.aspx'))
+
+
+def test_settings():
+    return Settings(
+        host='127.0.0.1',
+        port=8000,
+        timezone='Asia/Shanghai',
+        data_dir=Path('data'),
+        database_path=Path('data/test.sqlite3'),
+        campus_login_url='http://portal.test/Default.aspx',
+        campus_electricity_url='http://portal.test/Web/Student/FeeElect.aspx',
+        smtp_host='',
+        smtp_port=587,
+        smtp_username='',
+        smtp_password='',
+        smtp_from='',
+    )
 
 
 class CampusPortalParserTests(unittest.TestCase):
@@ -21,6 +78,11 @@ class CampusPortalParserTests(unittest.TestCase):
         value, unit = parse_electricity_value('<span>当前电量：12.5 度</span>')
         self.assertEqual(value, 12.5)
         self.assertEqual(unit, '度')
+
+    def test_parse_electricity_value_with_fee_elect_room_money_span(self):
+        value, unit = parse_electricity_value('<span id="lblRoomMoney">20.93 元</span>')
+        self.assertEqual(value, 20.93)
+        self.assertEqual(unit, '元')
 
     def test_parse_electricity_value_raises_for_unknown_shape(self):
         with self.assertRaises(PortalParseError):
@@ -33,13 +95,72 @@ class CampusPortalParserTests(unittest.TestCase):
 
     def test_login_page_detector_matches_real_field_names(self):
         self.assertEqual(diagnose_portal_response('<input name="UserPwd" type="password" /><input name="InputCode" />').kind, 'login_page')
+        self.assertEqual(
+            diagnose_portal_response(
+                '<form><input type="hidden" name="__EVENTVALIDATION" value="x" />'
+                '<input name="UserName" /><button>登录</button></form>',
+            ).kind,
+            'login_page',
+        )
+
+    def test_electricity_webforms_page_is_not_login_page(self):
+        self.assertEqual(
+            diagnose_portal_response(
+                '<form><input type="hidden" name="__EVENTVALIDATION" value="x" />'
+                '<span>自助购电</span><span id="lblRoomMoney">当前电量：12.5 度</span></form>',
+            ).kind,
+            'electricity_page',
+        )
 
     def test_authenticated_page_detector_does_not_accept_login_form(self):
-        from backend.app.integrations.campus_portal import _looks_like_authenticated_page
+        from backend.app.integrations.campus_portal import _looks_like_authenticated_page, _looks_like_login_page
 
         self.assertFalse(_looks_like_authenticated_page('<input name="UserPwd" type="password" /><input name="InputCode" />'))
         self.assertTrue(_looks_like_authenticated_page('<a>安全退出</a><span>业务办理</span>'))
+        authenticated_page = '<nav>修改密码</nav><main>账号管理中心</main><a>退出</a>'
+        self.assertFalse(_looks_like_login_page(authenticated_page))
+        self.assertTrue(_looks_like_authenticated_page(authenticated_page))
+        self.assertTrue(_looks_like_authenticated_page('<html><head><title>管理中心</title></head><frameset></frameset></html>'))
 
+    def test_fee_elect_building_mapping_supports_c_zone_and_numeric_house(self):
+        mapped = map_fee_elect_room_fields(RoomSelection(building='C20', room='2324'))
+        self.assertEqual(mapped.zone_id, '1')
+        self.assertEqual(mapped.house, '20')
+        self.assertEqual(mapped.room, '2324')
+
+        mapped = map_fee_elect_room_fields(RoomSelection(building='20', room='2324'))
+        self.assertEqual(mapped.zone_id, '1')
+        self.assertEqual(mapped.house, '20')
+
+        mapped = map_fee_elect_room_fields(RoomSelection(building='c20', room='2324'))
+        self.assertEqual(mapped.zone_id, '1')
+        self.assertEqual(mapped.house, '20')
+
+    def test_build_fee_elect_query_fields_preserves_state_and_omits_purchase_submit(self):
+        fields = build_fee_elect_query_fields(
+            '''
+            <form action="FeeElect.aspx" method="post">
+              <input type="hidden" name="__VIEWSTATE" value="view" />
+              <input type="hidden" name="__EVENTVALIDATION" value="event" />
+              <input name="txtSchoolCardBalance" value="88.00" />
+              <input name="FeeAmtTxt" value="" />
+              <input name="btkOK" value="下一步" />
+            </form>
+            ''',
+            RoomSelection(building='C20', room='2324'),
+        )
+
+        self.assertEqual(fields['__VIEWSTATE'], 'view')
+        self.assertEqual(fields['__EVENTVALIDATION'], 'event')
+        self.assertEqual(fields['txtSchoolCardBalance'], '88.00')
+        self.assertEqual(fields['ZoneID'], '1')
+        self.assertEqual(fields['txtHouse'], '20')
+        self.assertEqual(fields['txtRoom'], '2324')
+        self.assertEqual(fields['btnQuery'], '查询电量')
+        self.assertEqual(fields['FeeAmtTxt'], '10')
+        self.assertNotIn('btkOK', fields)
+
+    def test_build_login_submission_preserves_hidden_fields(self):
         submission = build_login_submission(
             'http://portal.test/Default.aspx',
             '''
@@ -96,20 +217,7 @@ class CampusPortalParserTests(unittest.TestCase):
             proxy_target_from_path('/portal/proxy?url=http%3A%2F%2Fevil.test%2Fimg.png', 'http://portal.test/Default.aspx')
 
     def test_submit_login_page_rejects_tampered_action_host(self):
-        client = CampusPortalClient(Settings(
-            host='127.0.0.1',
-            port=8000,
-            timezone='Asia/Shanghai',
-            data_dir=Path('data'),
-            database_path=Path('data/test.sqlite3'),
-            campus_login_url='http://portal.test/Default.aspx',
-            campus_electricity_url='http://portal.test/web/auths/index.aspx',
-            smtp_host='',
-            smtp_port=587,
-            smtp_username='',
-            smtp_password='',
-            smtp_from='',
-        ))
+        client = CampusPortalClient(test_settings())
 
         with self.assertRaises(Exception):
             client.submit_login_page({
@@ -118,20 +226,57 @@ class CampusPortalParserTests(unittest.TestCase):
                 'UserPwd': 'secret',
             })
 
+    def test_submit_login_page_accepts_authenticated_account_page_with_password_menu(self):
+        client = CampusPortalClient(test_settings())
+        client.opener = FakePortalOpener('<nav>修改密码</nav><main>账号管理中心</main><a>退出</a>')
+
+        success, body = client.submit_login_page({
+            '__portal_action': 'http://portal.test/Default.aspx',
+            'UserName': 'student',
+            'UserPwd': 'secret',
+            'InputCode': '1234',
+        })
+
+        self.assertTrue(success)
+        self.assertEqual(body, '')
+        self.assertTrue(client.authenticated)
+
     def test_client_keeps_submit_login_page_method_after_proxy_resource_method(self):
-        client = CampusPortalClient(Settings(
-            host='127.0.0.1',
-            port=8000,
-            timezone='Asia/Shanghai',
-            data_dir=Path('data'),
-            database_path=Path('data/test.sqlite3'),
-            campus_login_url='http://portal.test/Default.aspx',
-            campus_electricity_url='http://portal.test/web/auths/index.aspx',
-            smtp_host='',
-            smtp_port=587,
-            smtp_username='',
-            smtp_password='',
-            smtp_from='',
-        ))
+        client = CampusPortalClient(test_settings())
 
         self.assertTrue(callable(client.submit_login_page))
+
+    def test_fetch_reading_queries_fee_elect_page_with_current_session(self):
+        fee_elect_page = '''
+        <form action="FeeElect.aspx" method="post">
+          <span>自助购电</span>
+          <input type="hidden" name="__VIEWSTATE" value="view" />
+          <input type="hidden" name="__EVENTVALIDATION" value="event" />
+          <input name="txtSchoolCardBalance" value="88.00" />
+          <input name="FeeAmtTxt" value="10" />
+          <input name="btkOK" value="下一步" />
+        </form>
+        '''
+        result_page = '<span>自助购电</span><span id="lblRoomMoney">20.93 元</span>'
+        client = CampusPortalClient(test_settings())
+        client.authenticated = True
+        opener = FakeSequenceOpener([fee_elect_page, result_page])
+        client.opener = opener
+
+        reading = client.fetch_reading(RoomSelection(building='C20', room='2324'))
+
+        self.assertEqual(reading.numeric_value, 20.93)
+        self.assertEqual(reading.unit, '元')
+        self.assertEqual(reading.building, 'C20')
+        self.assertEqual(reading.room, '2324')
+        self.assertEqual(len(opener.requests), 2)
+        self.assertEqual(getattr(opener.requests[0], 'full_url'), 'http://portal.test/Web/Student/FeeElect.aspx')
+        post_data = opener.requests[1].data.decode('utf-8')
+        self.assertIn('__VIEWSTATE=view', post_data)
+        self.assertIn('__EVENTVALIDATION=event', post_data)
+        self.assertIn('txtSchoolCardBalance=88.00', post_data)
+        self.assertIn('ZoneID=1', post_data)
+        self.assertIn('txtHouse=20', post_data)
+        self.assertIn('txtRoom=2324', post_data)
+        self.assertIn('btnQuery=%E6%9F%A5%E8%AF%A2%E7%94%B5%E9%87%8F', post_data)
+        self.assertNotIn('btkOK', post_data)

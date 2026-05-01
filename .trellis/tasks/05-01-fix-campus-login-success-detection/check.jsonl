@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review bug fix against campus portal proxy login contract and backend quality expectations."}
+{"file": ".trellis/tasks/05-01-fix-campus-login-success-detection/research/live-campus-portal-login.md", "reason": "Verify the fix matches observed live portal login fields and avoids generic password text false negatives."}

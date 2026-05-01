@@ -27,6 +27,13 @@ class PortalResponseDiagnosis:
     message: str
 
 
+@dataclass(frozen=True)
+class FeeElectRoomFields:
+    zone_id: str
+    house: str
+    room: str
+
+
 class CampusPortalClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -132,7 +139,30 @@ class CampusPortalClient:
         if not self.authenticated:
             raise AuthenticationError("Campus portal login is required before collection.")
         try:
-            with self.opener.open(_get_request(self.settings.campus_electricity_url), timeout=15) as response:
+            electricity_url = self.settings.campus_electricity_url
+            with self.opener.open(_get_request(electricity_url), timeout=15) as response:
+                body = response.read().decode(_response_charset(response), errors="ignore")
+        except OSError as exc:
+            raise PortalFetchError("Electricity portal is unavailable.") from exc
+        diagnosis = diagnose_portal_response(body)
+        if diagnosis.kind == "login_page":
+            self.authenticated = False
+            raise AuthenticationError("Campus portal session expired or login did not complete. Please log in again.")
+        if diagnosis.kind != "electricity_page":
+            raise PortalParseError(diagnosis.message)
+        fields = build_fee_elect_query_fields(body, selection)
+        request = Request(
+            electricity_url,
+            data=urlencode(fields).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": electricity_url,
+                "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
+            },
+        )
+        try:
+            with self.opener.open(request, timeout=15) as response:
                 body = response.read().decode(_response_charset(response), errors="ignore")
         except OSError as exc:
             raise PortalFetchError("Electricity portal is unavailable.") from exc
@@ -259,12 +289,36 @@ def import_cookie_header(cookie_jar: CookieJar, cookie_header: str, origin_url: 
     return imported
 
 
+def build_fee_elect_query_fields(page_html: str, selection: RoomSelection) -> dict[str, str]:
+    form = _select_form_with_fields(page_html, ("__VIEWSTATE", "__EVENTVALIDATION", "txtHouse", "txtRoom", "FeeAmtTxt"))
+    fields = dict(form.inputs) if form is not None else {}
+    room_fields = map_fee_elect_room_fields(selection)
+    fields.pop("btkOK", None)
+    fields["ZoneID"] = room_fields.zone_id
+    fields["txtHouse"] = room_fields.house
+    fields["txtRoom"] = room_fields.room
+    fields["btnQuery"] = "查询电量"
+    fields["FeeAmtTxt"] = fields.get("FeeAmtTxt") or "10"
+    return fields
+
+
+def map_fee_elect_room_fields(selection: RoomSelection) -> FeeElectRoomFields:
+    building = selection.building.strip()
+    room = selection.room.strip()
+    match = re.fullmatch(r"(?i)\s*C\s*-?\s*(\d{1,3})\s*", building)
+    if match:
+        return FeeElectRoomFields(zone_id="1", house=match.group(1), room=room)
+    if re.fullmatch(r"\d{1,3}", building):
+        return FeeElectRoomFields(zone_id="1", house=building, room=room)
+    raise PortalParseError("Unsupported dorm building format for FeeElect query.")
+
+
 def diagnose_portal_response(page_html: str) -> PortalResponseDiagnosis:
     text = _visible_text(page_html)
     lowered = text.lower()
     if _looks_like_login_page(page_html):
         return PortalResponseDiagnosis("login_page", "Campus portal returned the login page, so the app is not authenticated or the session expired.")
-    if any(token in text for token in ("自助购电", "电费", "电量", "余额", "购电")):
+    if "lblRoomMoney" in page_html or any(token in text for token in ("自助购电", "电费", "电量", "余额", "购电")):
         return PortalResponseDiagnosis("electricity_page", "Campus portal returned an electricity-related page.")
     if any(token in text for token in ("没有权限", "无权限", "未授权", "请先登录")):
         return PortalResponseDiagnosis("access_denied", "Campus portal returned an access-denied page after login.")
@@ -278,14 +332,17 @@ def diagnose_portal_response(page_html: str) -> PortalResponseDiagnosis:
 def parse_electricity_value(page_html: str) -> tuple[float, str]:
     text = _visible_text(page_html)
     patterns = [
+        r"<span\b[^>]*\bid\s*=\s*([\"'])lblRoomMoney\1[^>]*>\s*(-?\d+(?:\.\d+)?)\s*(元|度|kWh|KWH)?\s*</span>",
         r"(?:余额|电费|剩余电量|当前电量)\s*[:：]?\s*(-?\d+(?:\.\d+)?)\s*(元|度|kWh|KWH)?",
         r"(-?\d+(?:\.\d+)?)\s*(元|度|kWh|KWH)\s*(?:余额|剩余|电量)?",
     ]
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        target = page_html if "lblRoomMoney" in pattern else text
+        match = re.search(pattern, target, re.IGNORECASE)
         if match:
-            value = float(match.group(1))
-            unit = match.group(2) or ""
+            value_index = 2 if "lblRoomMoney" in pattern else 1
+            value = float(match.group(value_index))
+            unit = match.group(value_index + 1) or ""
             return value, unit
     raise PortalParseError("Could not extract electricity value from portal response.")
 
@@ -343,6 +400,16 @@ def _select_login_form(page_html: str) -> _ParsedForm | None:
     return parser.forms[0]
 
 
+def _select_form_with_fields(page_html: str, field_names: tuple[str, ...]) -> _ParsedForm | None:
+    parser = _LoginFormParser()
+    parser.feed(page_html)
+    lowered_names = {name.lower() for name in field_names}
+    for form in parser.forms:
+        if any(name.lower() in lowered_names for name in form.inputs):
+            return form
+    return parser.forms[0] if parser.forms else None
+
+
 def _find_username_field(inputs: dict[str, str]) -> str | None:
     candidates = ("user", "account", "login", "name", "uid", "xh", "txtuser", "txtname", "username")
     return _find_named_field(inputs, candidates)
@@ -367,19 +434,46 @@ def _looks_like_login_failure(body: str) -> bool:
 
 
 def _looks_like_login_page(body: str) -> bool:
-    lowered = body.lower()
     return (
-        "password" in lowered
-        or "密码" in body
-        or "inputcode" in lowered
-        or "__eventvalidation" in lowered
-        or "name=\"UserPwd\"" in body
+        _has_input_named(body, ("userpwd", "inputcode"))
+        or _has_password_input(body)
+        or _has_webforms_login_state(body)
     )
+
+
+def _has_webforms_login_state(body: str) -> bool:
+    lowered = body.lower()
+    if "__eventvalidation" not in lowered:
+        return False
+    text = _visible_text(body)
+    return _has_input_named(body, ("username", "txtusername", "txtuser", "txtname")) and any(
+        token in text
+        for token in ("登录", "验证码", "用户名", "账号")
+    )
+
+
+def _has_input_named(body: str, names: tuple[str, ...]) -> bool:
+    return any(
+        _has_input_attr(body, "name", name)
+        for name in names
+    )
+
+
+def _has_password_input(body: str) -> bool:
+    return _has_input_attr(body, "type", "password")
+
+
+def _has_input_attr(body: str, attr: str, value: str) -> bool:
+    attr_pattern = re.escape(attr)
+    value_pattern = re.escape(value)
+    quoted = rf"<input\b[^>]*\b{attr_pattern}\s*=\s*([\"']){value_pattern}\1"
+    unquoted = rf"<input\b[^>]*\b{attr_pattern}\s*=\s*{value_pattern}(?:\s|/?>)"
+    return re.search(quoted, body, re.IGNORECASE) is not None or re.search(unquoted, body, re.IGNORECASE) is not None
 
 
 def _looks_like_authenticated_page(body: str) -> bool:
     text = _visible_text(body)
-    return any(token in text for token in ("安全退出", "退出登录", "注销", "自助购电", "业务办理", "服务大厅"))
+    return any(token in text for token in ("管理中心", "安全退出", "退出登录", "退出", "注销", "自助购电", "业务办理", "服务大厅"))
 
 
 def _get_request(url: str) -> Request:

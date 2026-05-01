@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, tzinfo
 import logging
 import threading
-from zoneinfo import ZoneInfo
 
 from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.integrations.campus_portal import CampusPortalClient
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class CollectionScheduler:
-    def __init__(self, repository: Repository, portal: CampusPortalClient, alerts: EmailAlertService, timezone: ZoneInfo):
+    def __init__(self, repository: Repository, portal: CampusPortalClient, alerts: EmailAlertService, timezone: tzinfo):
         self.repository = repository
         self.portal = portal
         self.alerts = alerts

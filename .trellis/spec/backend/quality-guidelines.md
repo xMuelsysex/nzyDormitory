@@ -188,10 +188,16 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 - Dynamic portal paths under `/portal/<path>` that are requested by campus JavaScript must map to the same campus host through the same safe resource fetcher.
 - HTML and CSS returned through `/portal/proxy` or `/portal/<path>` must be recursively rewritten; binary assets must preserve the upstream content type.
 - `POST /portal/login` must submit all received form fields except `__portal_action` to the upstream campus action using the same `CookieJar`.
+- `CAMPUS_ELECTRICITY_URL` must default to `/Web/Student/FeeElect.aspx`, the self-service electricity page, not the authenticated portal shell.
+- `fetch_reading()` must query FeeElect by first `GET`ing the electricity page with the authenticated `CookieJar`, preserving WebForms hidden fields such as `__VIEWSTATE` and `__EVENTVALIDATION`, then `POST`ing back with `ZoneID`, `txtHouse`, `txtRoom`, `btnQuery=查询电量`, and `FeeAmtTxt` defaulting to `10` when blank.
+- C-zone room selection maps `C20`/`c20` to `ZoneID=1` and `txtHouse=20`; raw numeric building input such as `20` is also treated as C-zone house number input for the current dorm workflow.
+- `fetch_reading()` must never submit `btkOK` when reading electricity data because that starts the purchase flow.
+- FeeElect query results must parse `span#lblRoomMoney` values such as `20.93 元` into `ElectricityReading.numeric_value=20.93` and `unit="元"`.
 - Real source portal research recorded in `.trellis/tasks/04-26-dorm-electricity-portal-research/research-findings.jsonl` verifies `Default.aspx` fields: `__VIEWSTATE`, `__EVENTVALIDATION`, `UserName`, `UserPwd`, `InputCode`, and `imgBtn`.
 - The source portal has captcha (`InputCode`); invalid credentials/captcha return HTTP `200` with the login form still present and no redirect.
 - `submit_login_page()` must never treat HTTP `200` or absence of generic failure text as success.
-- Login success requires login/captcha fields to disappear and an authenticated-page signal such as `安全退出`, `退出登录`, `注销`, `自助购电`, `业务办理`, or `服务大厅` to be present.
+- Login success requires login/captcha fields to disappear and an authenticated-page signal such as `管理中心`, `安全退出`, `退出登录`, `退出`, `注销`, `自助购电`, `业务办理`, or `服务大厅` to be present.
+- Login-page detection must key on structural login form signals such as `UserPwd`, `InputCode`, password inputs, or `__EVENTVALIDATION` paired with login controls; do not reject authenticated pages just because visible navigation text contains generic password-management words such as `密码` or `修改密码`. `__EVENTVALIDATION` alone is not enough because authenticated WebForms pages such as the electricity page also include it.
 - A successful login redirects back to the app with `303 /?login=success`; failed login returns the rewritten campus login page and must not redirect back to the app.
 - Passwords and cookies must never be logged, persisted, returned as JSON, or rendered by the app shell.
 - `fetch_reading()` must classify the returned portal HTML with `diagnose_portal_response()` before parsing values; do not report a generic parse failure until login/home/error pages are ruled out.
@@ -228,8 +234,11 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 - Unit: `proxy_target_from_path()` accepts same-host campus URLs and rejects different hosts.
 - Unit: `diagnose_portal_response()` distinguishes login page, portal home page, and electricity-related page before parsing.
 - Unit: `parse_electricity_value()` still raises `PortalParseError` for unknown confirmed electricity shapes.
+- Unit: FeeElect building mapping converts C-zone and numeric building input to `ZoneID`/`txtHouse`.
+- Unit: FeeElect POST field construction preserves WebForms hidden fields, submits `btnQuery`, and omits `btkOK`.
+- Unit: `fetch_reading()` performs GET then POST against FeeElect and parses `span#lblRoomMoney`.
 - Unit/API smoke: `GET /portal/login` returns HTML from `load_login_page()`.
-- Unit: real-source login form detector matches `UserName`, `UserPwd`, `InputCode`, `__VIEWSTATE`, and `__EVENTVALIDATION` semantics.
+- Unit: real-source login form detector matches `UserName`, `UserPwd`, `InputCode`, `__VIEWSTATE`, and `__EVENTVALIDATION` semantics without treating authenticated password-management navigation as a login form.
 - Unit/live-safe: invalid source portal login attempt must return `success=False`, `authenticated=False`, login form still present, and authenticated signal absent.
 - Unit/API smoke: successful `POST /portal/login` responds with `303 /?login=success`.
 - Browser: Playwright must load `/portal/login` on a fresh process and confirm portal assets, including dynamic `/portal/web/...` requests, return `200` except unrelated browser `favicon.ico`.
