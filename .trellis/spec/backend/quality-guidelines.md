@@ -101,6 +101,8 @@ SMTP_USERNAME
 SMTP_PASSWORD
 SMTP_FROM
 APP_TIMEZONE
+CAMPUS_LOGIN_URL
+CAMPUS_ELECTRICITY_URL
 ```
 
 ### 4. Validation & Error Matrix
@@ -188,7 +190,7 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 - Dynamic portal paths under `/portal/<path>` that are requested by campus JavaScript must map to the same campus host through the same safe resource fetcher.
 - HTML and CSS returned through `/portal/proxy` or `/portal/<path>` must be recursively rewritten; binary assets must preserve the upstream content type.
 - `POST /portal/login` must submit all received form fields except `__portal_action` to the upstream campus action using the same `CookieJar`.
-- `CAMPUS_ELECTRICITY_URL` must default to `/Web/Student/FeeElect.aspx`, the self-service electricity page, not the authenticated portal shell.
+- `CAMPUS_LOGIN_URL` defaults to the WebVPN login/auth page. `CAMPUS_ELECTRICITY_URL` must default to the same WebVPN gateway path for `/Web/Student/FeeElect.aspx`, the self-service electricity page, not the login page or authenticated portal shell.
 - `fetch_reading()` must query FeeElect by first `GET`ing the electricity page with the authenticated `CookieJar`, preserving WebForms hidden fields such as `__VIEWSTATE` and `__EVENTVALIDATION`, then `POST`ing back with `ZoneID`, `txtHouse`, `txtRoom`, `btnQuery=查询电量`, and `FeeAmtTxt` defaulting to `10` when blank.
 - C-zone room selection maps `C20`/`c20` to `ZoneID=1` and `txtHouse=20`; raw numeric building input such as `20` is also treated as C-zone house number input for the current dorm workflow.
 - `fetch_reading()` must never submit `btkOK` when reading electricity data because that starts the purchase flow.
