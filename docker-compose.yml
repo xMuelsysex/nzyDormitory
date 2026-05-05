@@ -1,0 +1,25 @@
+services:
+  dorm-electricity:
+    build: .
+    command: python -m backend.app.main
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      APP_TIMEZONE: "Asia/Shanghai"
+      DATA_DIR: "/app/data"
+      CAMPUS_LOGIN_URL: "${CAMPUS_LOGIN_URL:-https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx}"
+      CAMPUS_ELECTRICITY_URL: "${CAMPUS_ELECTRICITY_URL:-https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+    volumes:
+      - dorm-electricity-data:/app/data
+
+volumes:
+  dorm-electricity-data:
+    name: dorm-electricity-data

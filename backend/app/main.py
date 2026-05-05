@@ -40,7 +40,7 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
                 body, content_type = portal.fetch_proxy_resource(self.path)
                 send_bytes(self, 200, body, content_type)
             elif path.startswith("/portal/"):
-                body, content_type = portal.fetch_portal_path(path)
+                body, content_type = portal.fetch_portal_path(self.path)
                 send_bytes(self, 200, body, content_type)
             else:
                 self._serve_static(path)

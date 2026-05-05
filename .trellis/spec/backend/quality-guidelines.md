@@ -49,6 +49,84 @@ When application code exists, test schedule validation, parser behavior, reading
 
 ---
 
+## Scenario: Docker Ubuntu Deployment Contract
+
+### 1. Scope / Trigger
+
+- Trigger: deployment documentation or container configuration changes for fresh Ubuntu server installs.
+- Applies when editing `README.md`, `Dockerfile`, `.dockerignore`, or `docker-compose.yml`.
+
+### 2. Signatures
+
+Deployment commands must keep these logical operations available:
+
+```text
+docker compose up -d --build
+docker compose logs -f dorm-electricity
+docker compose restart dorm-electricity
+docker compose down
+git pull --ff-only
+```
+
+The container entrypoint must remain:
+
+```text
+python -m backend.app.main
+```
+
+### 3. Contracts
+
+- The container must bind `APP_HOST=0.0.0.0` and expose `APP_PORT=8000`.
+- `DATA_DIR` must point to `/app/data` inside the container.
+- Compose must mount a persistent named volume at `/app/data`.
+- Compose must include WebVPN defaults for `CAMPUS_LOGIN_URL` and `CAMPUS_ELECTRICITY_URL`.
+- SMTP values must be environment-driven and remain optional unless email alerts are enabled.
+- Secrets must be supplied through deployment environment such as `.env`, not hard-coded in source.
+- Deployment `.env` files must be excluded from Git and Docker build context.
+
+### 4. Validation & Error Matrix
+
+| Condition | Error |
+|---|---|
+| Docker CLI unavailable locally | Note that Compose config/build checks could not be run |
+| Compose file has invalid YAML | Fix before reporting deployment docs complete |
+| Persistent volume missing | Data can be lost across rebuilds |
+| `APP_HOST` stays `127.0.0.1` in container | Server is unreachable through mapped Docker port |
+| WebVPN URL env keys missing | Deployment may fall back to incorrect campus endpoints |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a fresh Ubuntu host can install Docker, clone from GitHub, run `docker compose up -d --build`, and preserve readings after updates.
+- Base: SMTP settings are empty; monitoring still works and email alerts remain disabled.
+- Bad: deployment requires manual file creation not documented in README, loses SQLite data on rebuild, or hard-codes secrets in Compose.
+
+### 6. Tests Required
+
+- Run unit tests for affected settings and portal behavior when URL defaults are involved.
+- Run `docker compose config` when Docker is available.
+- If Docker is unavailable, parse `docker-compose.yml` with a YAML parser and explicitly report the skipped Docker CLI check.
+- Run `rg "10\.80\.34\.137:92" .` when replacing old campus endpoint defaults.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+docker run --rm -p 8000:8000 app
+```
+
+This loses runtime data and relies on undocumented defaults.
+
+#### Correct
+
+```text
+docker compose up -d --build
+```
+
+Compose sets deployment environment, maps port `8000`, and mounts the persistent `/app/data` volume.
+
+---
+
 ## Scenario: Dorm Electricity Monitoring Cross-Layer Contract
 
 ### 1. Scope / Trigger
@@ -181,13 +259,18 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 
 ### 3. Contracts
 
-- `GET /portal/login` must fetch `CAMPUS_LOGIN_URL` through the backend `CookieJar` and rewrite the selected campus `<form>` to submit to local `POST /portal/login`.
+- `GET /portal/login` must fetch `CAMPUS_LOGIN_URL` through the backend `CookieJar` and rewrite the selected campus login `<form>` to submit to local `POST /portal/login`; pages with multiple forms must not rewrite a preceding search/utility form while leaving the real login form untouched.
 - The rewritten form must include `__portal_action` with the original absolute campus form action so the backend can submit to the correct upstream endpoint.
+- Form `action`/`method` stripping must handle quoted and unquoted HTML attributes so duplicate upstream `action` attributes cannot make browser submission bypass `/portal/login`.
 - The proxy must not inject custom banners, headers, scripts, or styling into campus HTML; users should see the campus page as-is except for rewritten URLs.
-- Relative and absolute campus `src`/`href` attributes must be rewritten to `/portal/proxy?url=<encoded absolute campus URL>`.
+- Relative and absolute campus `src`/`href` attributes, including quoted and unquoted values, must be rewritten to `/portal/proxy?url=<encoded absolute campus URL>`.
+- URL rewriting must use the final upstream response URL, not only the configured `CAMPUS_LOGIN_URL`, because the WebVPN auth page can redirect to the real CAS host before returning the login HTML.
+- WebVPN gateway paths such as `/http/<token>/web/auths/index.aspx` must keep the `/http/<token>` prefix when resolving root-relative form actions, root-relative assets, CSS `url(...)` values, and dynamic `/portal/<path>` resource requests; otherwise the browser requests the WebVPN host root and the login page can render blank.
+- WebVPN client helper scripts such as `/webvpn/bundle*.js` must be stripped from proxied HTML because backend proxy rewriting owns local URL handling; leave ordinary campus app scripts intact and proxied.
+- Root-relative static assets from the NJUCM CAS login page, such as `/js`, `/themes`, and `/favicon.ico`, must resolve against the final CAS response host so the browser gets fetchable resource URLs.
 - CSS `url(...)` references returned through the proxy must also be rewritten to `/portal/proxy`.
-- `/portal/proxy` must only fetch URLs whose host matches `CAMPUS_LOGIN_URL`; it must not become an open proxy.
-- Dynamic portal paths under `/portal/<path>` that are requested by campus JavaScript must map to the same campus host through the same safe resource fetcher.
+- `/portal/proxy` must only fetch URLs whose host matches `CAMPUS_LOGIN_URL` or the current final login response URL; it must not become an open proxy.
+- Dynamic portal paths under `/portal/<path>` that are requested by campus JavaScript must map to the same campus host through the same safe resource fetcher and preserve query strings such as cache/version parameters.
 - HTML and CSS returned through `/portal/proxy` or `/portal/<path>` must be recursively rewritten; binary assets must preserve the upstream content type.
 - `POST /portal/login` must submit all received form fields except `__portal_action` to the upstream campus action using the same `CookieJar`.
 - `CAMPUS_LOGIN_URL` defaults to the WebVPN login/auth page. `CAMPUS_ELECTRICITY_URL` must default to the same WebVPN gateway path for `/Web/Student/FeeElect.aspx`, the self-service electricity page, not the login page or authenticated portal shell.
@@ -199,6 +282,7 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 - The source portal has captcha (`InputCode`); invalid credentials/captcha return HTTP `200` with the login form still present and no redirect.
 - `submit_login_page()` must never treat HTTP `200` or absence of generic failure text as success.
 - Login success requires login/captcha fields to disappear and an authenticated-page signal such as `管理中心`, `安全退出`, `退出登录`, `退出`, `注销`, `自助购电`, `业务办理`, or `服务大厅` to be present.
+- If the WebVPN/CAS step returns a frameset or iframe shell, the client must fetch only allow-listed same-host or current-final-response-host frame URLs and continue proxying any frame that still looks like the underlying campus portal login page.
 - Login-page detection must key on structural login form signals such as `UserPwd`, `InputCode`, password inputs, or `__EVENTVALIDATION` paired with login controls; do not reject authenticated pages just because visible navigation text contains generic password-management words such as `密码` or `修改密码`. `__EVENTVALIDATION` alone is not enough because authenticated WebForms pages such as the electricity page also include it.
 - A successful login redirects back to the app with `303 /?login=success`; failed login returns the rewritten campus login page and must not redirect back to the app.
 - Passwords and cookies must never be logged, persisted, returned as JSON, or rendered by the app shell.
@@ -232,8 +316,12 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 ### 6. Tests Required
 
 - Unit: `rewrite_login_page()` rewrites the first login form to `action="/portal/login"`, injects `__portal_action`, rewrites `src`/`href` resources to `/portal/proxy`, and does not inject custom banner text.
+- Unit: `rewrite_login_page()` rewrites the actual login form when an earlier non-login form exists, removes quoted/unquoted upstream `action`/`method`, and rewrites quoted/unquoted `src`/`href` resources.
+- Unit: `rewrite_login_page()`/`rewrite_html_urls()` strip WebVPN `/webvpn/bundle*.js` helper scripts while preserving ordinary campus scripts and captcha/image proxy URLs.
+- Unit: `rewrite_login_page()`, `rewrite_css_urls()`, and dynamic `/portal/<path>` fetches preserve the WebVPN `/http/<token>` gateway prefix for root-relative URLs while still rejecting different hosts.
 - Unit: `rewrite_css_urls()` rewrites CSS `url(...)` assets to same-host `/portal/proxy` URLs.
 - Unit: `proxy_target_from_path()` accepts same-host campus URLs and rejects different hosts.
+- Unit: dynamic `/portal/<path>?<query>` resource fetches preserve the query string while staying constrained to the login host.
 - Unit: `diagnose_portal_response()` distinguishes login page, portal home page, and electricity-related page before parsing.
 - Unit: `parse_electricity_value()` still raises `PortalParseError` for unknown confirmed electricity shapes.
 - Unit: FeeElect building mapping converts C-zone and numeric building input to `ZoneID`/`txtHouse`.
@@ -243,6 +331,7 @@ CampusPortalClient.fetch_reading(selection: RoomSelection) -> ElectricityReading
 - Unit: real-source login form detector matches `UserName`, `UserPwd`, `InputCode`, `__VIEWSTATE`, and `__EVENTVALIDATION` semantics without treating authenticated password-management navigation as a login form.
 - Unit/live-safe: invalid source portal login attempt must return `success=False`, `authenticated=False`, login form still present, and authenticated signal absent.
 - Unit/API smoke: successful `POST /portal/login` responds with `303 /?login=success`.
+- Unit: WebVPN/CAS frameset unwrapping skips cross-host frame candidates, fetches an allowed frame that still contains the portal login form, and returns that rewritten login page instead of marking authentication successful.
 - Browser: Playwright must load `/portal/login` on a fresh process and confirm portal assets, including dynamic `/portal/web/...` requests, return `200` except unrelated browser `favicon.ico`.
 - Manual authorized integration: on campus network, click login, authenticate on the proxied campus page, return to the app, then run one collection.
 

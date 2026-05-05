@@ -40,22 +40,34 @@ class CampusPortalClient:
         self.cookie_jar = CookieJar()
         self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
         self.authenticated = False
+        self._login_page_url = settings.campus_login_url
 
     def load_login_page(self) -> str:
         try:
             with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
                 body = response.read().decode(_response_charset(response), errors="ignore")
+                self._login_page_url = getattr(response, "url", self.settings.campus_login_url)
         except OSError as exc:
             raise PortalFetchError("Campus login portal is unavailable.") from exc
-        return rewrite_login_page(body, self.settings.campus_login_url)
+        frame_login = self._fetch_frame_login_page(body, self._login_page_url)
+        if frame_login is not None:
+            body, self._login_page_url = frame_login
+        return rewrite_login_page(body, self._login_page_url)
 
     def fetch_proxy_resource(self, request_path: str) -> tuple[bytes, str]:
-        return self._fetch_and_rewrite_resource(proxy_target_from_path(request_path, self.settings.campus_login_url))
+        return self._fetch_and_rewrite_resource(
+            proxy_target_from_path(request_path, self.settings.campus_login_url, self._login_page_url),
+        )
 
     def fetch_portal_path(self, portal_path: str) -> tuple[bytes, str]:
-        relative_path = portal_path.removeprefix("/portal/")
-        target = urljoin(self.settings.campus_login_url, relative_path)
-        if not _is_allowed_portal_url(target, self.settings.campus_login_url):
+        parsed_path = urlparse(portal_path)
+        relative_path = parsed_path.path.removeprefix("/portal/")
+        base_url = self._login_page_url or self.settings.campus_login_url
+        target = _absolute_portal_url(f"/{relative_path}", base_url)
+        if parsed_path.query:
+            separator = "&" if urlparse(target).query else "?"
+            target = f"{target}{separator}{parsed_path.query}"
+        if not _is_allowed_portal_url(target, self.settings.campus_login_url, (base_url,)):
             raise PortalFetchError("Portal proxy target is not allowed.")
         return self._fetch_and_rewrite_resource(target)
 
@@ -63,23 +75,24 @@ class CampusPortalClient:
         try:
             with self.opener.open(_get_request(target), timeout=15) as response:
                 body = response.read()
+                response_url = getattr(response, "url", target)
                 content_type = response.headers.get("Content-Type") or mimetypes.guess_type(urlparse(target).path)[0] or "application/octet-stream"
         except OSError as exc:
             raise PortalFetchError("Campus portal resource is unavailable.") from exc
         if "text/html" in content_type.lower():
             text = body.decode(_charset_from_content_type(content_type), errors="ignore")
-            body = rewrite_login_page(text, target).encode("utf-8")
+            body = rewrite_login_page(text, response_url).encode("utf-8")
             content_type = "text/html; charset=utf-8"
         elif "text/css" in content_type.lower():
             text = body.decode(_charset_from_content_type(content_type), errors="ignore")
-            body = rewrite_css_urls(text, target, self.settings.campus_login_url).encode("utf-8")
+            body = rewrite_css_urls(text, response_url, response_url).encode("utf-8")
             content_type = "text/css; charset=utf-8"
         return body, content_type
 
     def submit_login_page(self, fields: dict[str, str]) -> tuple[bool, str]:
-        action = fields.pop("__portal_action", self.settings.campus_login_url)
-        target = urljoin(self.settings.campus_login_url, action)
-        if not _is_allowed_portal_url(target, self.settings.campus_login_url):
+        action = fields.pop("__portal_action", self._login_page_url)
+        target = urljoin(self._login_page_url, action)
+        if not _is_allowed_portal_url(target, self.settings.campus_login_url, (self._login_page_url,)):
             raise PortalFetchError("Portal login target is not allowed.")
         request = Request(
             target,
@@ -87,21 +100,44 @@ class CampusPortalClient:
             method="POST",
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": self.settings.campus_login_url,
+                "Referer": self._login_page_url,
                 "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
             },
         )
         try:
             with self.opener.open(request, timeout=15) as response:
                 body = response.read().decode(_response_charset(response), errors="ignore")
-                response_url = getattr(response, "url", self.settings.campus_login_url)
+                response_url = getattr(response, "url", self._login_page_url)
         except OSError as exc:
             raise PortalFetchError("Campus login portal is unavailable.") from exc
+        frame_login = self._fetch_frame_login_page(body, response_url)
+        if frame_login is not None:
+            body, response_url = frame_login
         if _looks_like_login_failure(body) or _looks_like_login_page(body) or not _looks_like_authenticated_page(body):
             self.authenticated = False
+            self._login_page_url = response_url
             return False, rewrite_login_page(body, response_url)
         self.authenticated = True
         return True, ""
+
+    def _fetch_frame_login_page(self, body: str, response_url: str) -> tuple[str, str] | None:
+        if not _looks_like_frame_page(body):
+            return None
+        allowed_urls = (self._login_page_url, response_url)
+        for frame_url in _candidate_frame_urls(body, response_url):
+            if not _is_allowed_portal_url(frame_url, self.settings.campus_login_url, allowed_urls):
+                continue
+            try:
+                with self.opener.open(_get_request(frame_url), timeout=15) as response:
+                    frame_body = response.read().decode(_response_charset(response), errors="ignore")
+                    final_url = getattr(response, "url", frame_url)
+            except OSError:
+                continue
+            if not _is_allowed_portal_url(final_url, self.settings.campus_login_url, allowed_urls):
+                continue
+            if _looks_like_login_page(frame_body):
+                return frame_body, final_url
+        return None
 
     def login(self, username: str, password: str) -> None:
         if not username or not password:
@@ -109,7 +145,8 @@ class CampusPortalClient:
         try:
             with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
                 login_page = response.read().decode(_response_charset(response), errors="ignore")
-            submission = build_login_submission(self.settings.campus_login_url, login_page, username, password)
+                login_page_url = getattr(response, "url", self.settings.campus_login_url)
+            submission = build_login_submission(login_page_url, login_page, username, password)
             data = urlencode(submission.fields).encode("utf-8")
             request = Request(
                 submission.url,
@@ -117,7 +154,7 @@ class CampusPortalClient:
                 method="POST",
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": self.settings.campus_login_url,
+                    "Referer": login_page_url,
                     "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
                 },
             )
@@ -183,60 +220,149 @@ class CampusPortalClient:
 
 
 def rewrite_login_page(page_html: str, login_url: str) -> str:
-    action = urljoin(login_url, _login_form_action(page_html))
-    rewritten = re.sub(r"<form\b([^>]*)>", _rewrite_form_start(action), page_html, count=1, flags=re.IGNORECASE)
+    login_form_index = _login_form_index(page_html)
+    if login_form_index is None:
+        return rewrite_html_urls(page_html, login_url)
+    action = _absolute_portal_url(_login_form_action(page_html), login_url)
     marker = f'<input type="hidden" name="__portal_action" value="{_escape_attr(action)}" />'
-    if "__portal_action" not in rewritten:
-        rewritten = re.sub(r"<form\b([^>]*)>", lambda match: f"{match.group(0)}{marker}", rewritten, count=1, flags=re.IGNORECASE)
+
+    form_index = -1
+
+    def replace_login_form(match: re.Match[str]) -> str:
+        nonlocal form_index
+        form_index += 1
+        if form_index != login_form_index:
+            return match.group(0)
+        rewritten_form = _rewrite_form_start(action)(match)
+        if "__portal_action" not in page_html:
+            rewritten_form = f"{rewritten_form}{marker}"
+        return rewritten_form
+
+    rewritten = re.sub(r"<form\b([^>]*)>", replace_login_form, page_html, flags=re.IGNORECASE)
     return rewrite_html_urls(rewritten, login_url)
 
 
 def rewrite_html_urls(page_html: str, base_url: str) -> str:
-    rewritten = page_html
+    rewritten = _strip_webvpn_client_scripts(page_html)
     for attr in ("src", "href"):
         rewritten = re.sub(
             rf"\b{attr}\s*=\s*(['\"])(.*?)\1",
-            lambda match: f'{attr}={match.group(1)}{_proxied_url(match.group(2), base_url)}{match.group(1)}',
+            lambda match: f'{attr}={match.group(1)}{_proxied_url(match.group(2), base_url, webvpn_root_assets_from_base=True)}{match.group(1)}',
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+        rewritten = re.sub(
+            rf"\b{attr}\s*=\s*([^\s'\">]+)",
+            lambda match: f'{attr}="{_proxied_url(match.group(1), base_url, webvpn_root_assets_from_base=True)}"',
             rewritten,
             flags=re.IGNORECASE,
         )
     return rewritten
 
 
+def _strip_webvpn_client_scripts(page_html: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        source = _script_src_from_attrs(match.group(1))
+        if source is not None and _is_webvpn_client_bundle_url(source):
+            return ""
+        return match.group(0)
+
+    return re.sub(
+        r"<script\b([^>]*)>\s*</script\s*>",
+        replace,
+        page_html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
+def _script_src_from_attrs(attrs: str) -> str | None:
+    match = re.search(r"\bsrc\s*=\s*(?:([\"'])(.*?)\1|([^\s>]+))", attrs, flags=re.IGNORECASE | re.DOTALL)
+    if match is None:
+        return None
+    return html.unescape(match.group(2) or match.group(3) or "")
+
+
+def _is_webvpn_client_bundle_url(value: str) -> bool:
+    parsed = urlparse(value.strip())
+    candidates = parse_qs(parsed.query).get("url", [])
+    if candidates:
+        return any(_is_webvpn_client_bundle_url(candidate) for candidate in candidates)
+    return _is_webvpn_client_bundle_path(parsed.path)
+
+
+def _is_webvpn_client_bundle_path(path: str) -> bool:
+    segments = [segment.lower() for segment in path.split("/") if segment]
+    return len(segments) >= 2 and segments[-2] == "webvpn" and re.fullmatch(r"bundle[^/]*\.js", segments[-1]) is not None
+
+
 def rewrite_css_urls(css: str, base_url: str, login_url: str) -> str:
     return re.sub(
         r"url\((['\"]?)(.*?)\1\)",
-        lambda match: f"url({match.group(1)}{_proxied_url(match.group(2), base_url, login_url)}{match.group(1)})",
+        lambda match: f"url({match.group(1)}{_proxied_url(match.group(2), base_url, login_url, webvpn_root_assets_from_base=True)}{match.group(1)})",
         css,
         flags=re.IGNORECASE,
     )
 
 
-def proxy_target_from_path(request_path: str, login_url: str) -> str:
+def proxy_target_from_path(request_path: str, login_url: str, *extra_allowed_urls: str) -> str:
     query = urlparse(request_path).query
     values = parse_qs(query).get("url", [])
     if not values:
         raise PortalFetchError("Portal proxy target is missing.")
     target = values[-1]
-    if not _is_allowed_portal_url(target, login_url):
+    if not _is_allowed_portal_url(target, login_url, extra_allowed_urls):
         raise PortalFetchError("Portal proxy target is not allowed.")
     return target
 
 
-def _proxied_url(value: str, base_url: str, login_url: str | None = None) -> str:
+def _proxied_url(
+    value: str,
+    base_url: str,
+    login_url: str | None = None,
+    *,
+    webvpn_root_assets_from_base: bool = False,
+) -> str:
     stripped = value.strip()
     if not stripped or stripped.startswith(("#", "data:", "javascript:", "mailto:", "tel:")):
         return value
-    absolute = urljoin(base_url, stripped)
+    absolute = _absolute_portal_url(stripped, base_url, webvpn_root_assets_from_base=webvpn_root_assets_from_base)
     if not _is_allowed_portal_url(absolute, login_url or base_url):
         return value
     return f"/portal/proxy?url={quote(absolute, safe='')}"
 
 
-def _is_allowed_portal_url(target: str, login_url: str) -> bool:
-    target_host = urlparse(target).netloc
-    login_host = urlparse(login_url).netloc
-    return bool(target_host) and target_host == login_host
+def _absolute_portal_url(value: str, base_url: str, *, webvpn_root_assets_from_base: bool = False) -> str:
+    if not value:
+        return base_url
+    stripped = value.strip()
+    if stripped.startswith("/") and not stripped.startswith("//"):
+        parsed = urlparse(base_url)
+        gateway_prefix = _webvpn_gateway_prefix(parsed.path)
+        if gateway_prefix and not stripped.startswith(f"{gateway_prefix}/"):
+            if webvpn_root_assets_from_base and _looks_like_root_static_asset(stripped):
+                base_dir = parsed.path.rsplit("/", 1)[0]
+                return parsed._replace(path=f"{base_dir}{stripped}", params="", query="", fragment="").geturl()
+            return parsed._replace(path=f"{gateway_prefix}{stripped}", params="", query="", fragment="").geturl()
+    return urljoin(base_url, stripped)
+
+
+def _webvpn_gateway_prefix(path: str) -> str:
+    match = re.match(r"^/(?:http|https)/[^/]+", path, flags=re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
+def _looks_like_root_static_asset(path: str) -> bool:
+    first_segment = path.strip("/").split("/", 1)[0].lower()
+    return first_segment in {"css", "favicon.ico", "images", "img", "js", "scripts", "themes"}
+
+
+def _is_allowed_portal_url(target: str, login_url: str, extra_allowed_urls: tuple[str, ...] = ()) -> bool:
+    parsed_target = urlparse(target)
+    if parsed_target.scheme not in {"http", "https"}:
+        return False
+    target_host = parsed_target.netloc
+    allowed_hosts = {urlparse(url).netloc for url in (login_url, *extra_allowed_urls) if url}
+    return bool(target_host) and target_host in allowed_hosts
 
 
 def _escape_attr(value: str) -> str:
@@ -250,13 +376,23 @@ def _login_form_action(page_html: str) -> str:
     return form.action
 
 
+def _login_form_index(page_html: str) -> int | None:
+    parser = _LoginFormParser()
+    parser.feed(page_html)
+    if not parser.forms:
+        return None
+    for index, form in enumerate(parser.forms):
+        if _find_password_field(form.inputs) is not None:
+            return index
+    return 0
+
+
 def _rewrite_form_start(action: str):
     def replace(match: re.Match[str]) -> str:
-        attrs = re.sub(r"\saction\s*=\s*(['\"]).*?\1", "", match.group(1), flags=re.IGNORECASE)
-        attrs = re.sub(r"\smethod\s*=\s*(['\"]).*?\1", "", attrs, flags=re.IGNORECASE)
+        attrs = re.sub(r"\saction\s*=\s*(?:(['\"]).*?\1|[^\s>]+)", "", match.group(1), flags=re.IGNORECASE)
+        attrs = re.sub(r"\smethod\s*=\s*(?:(['\"]).*?\1|[^\s>]+)", "", attrs, flags=re.IGNORECASE)
         return f'<form{attrs} method="post" action="/portal/login">'
     return replace
-
 
 
 def build_login_submission(login_url: str, login_page: str, username: str, password: str) -> LoginSubmission:
@@ -389,6 +525,20 @@ class _LoginFormParser(HTMLParser):
             self._action = ""
 
 
+class _FrameSrcParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.sources: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() not in {"frame", "iframe"}:
+            return
+        attr = {name.lower(): value or "" for name, value in attrs}
+        src = attr.get("src", "").strip()
+        if src:
+            self.sources.append(src)
+
+
 def _select_login_form(page_html: str) -> _ParsedForm | None:
     parser = _LoginFormParser()
     parser.feed(page_html)
@@ -439,6 +589,30 @@ def _looks_like_login_page(body: str) -> bool:
         or _has_password_input(body)
         or _has_webforms_login_state(body)
     )
+
+
+def _looks_like_frame_page(body: str) -> bool:
+    lowered = body.lower()
+    return "<frameset" in lowered or "<frame" in lowered or "<iframe" in lowered
+
+
+def _candidate_frame_urls(body: str, response_url: str) -> list[str]:
+    parser = _FrameSrcParser()
+    parser.feed(body)
+    candidates: list[tuple[int, int, str]] = []
+    for index, source in enumerate(parser.sources):
+        absolute = _absolute_portal_url(source, response_url)
+        candidates.append((-_frame_login_score(absolute), index, absolute))
+    return [url for _, _, url in sorted(candidates)]
+
+
+def _frame_login_score(url: str) -> int:
+    lowered = urlparse(url).path.lower()
+    score = 0
+    for token in ("login", "default", "accountinfo", "account", "student"):
+        if token in lowered:
+            score += 1
+    return score
 
 
 def _has_webforms_login_state(body: str) -> bool:

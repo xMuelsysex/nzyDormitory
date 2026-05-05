@@ -1,10 +1,11 @@
+import errno
 import unittest
 from io import BytesIO
 from unittest.mock import patch
 
 from backend.app.main import DormElectricityHandler, FRONTEND_DIR
 from backend.app.shared.errors import ValidationError
-from backend.app.shared.http import read_json_body
+from backend.app.shared.http import is_client_disconnect, read_json_body, send_error
 
 
 class StaticFileTests(unittest.TestCase):
@@ -67,3 +68,33 @@ class JsonBodyTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             read_json_body(handler)
+
+
+class ClientDisconnectTests(unittest.TestCase):
+    def test_client_disconnect_is_not_returned_as_unexpected_error(self):
+        handler = type('Handler', (), {})()
+
+        with (
+            patch('backend.app.shared.http.send_json') as send_json,
+            patch('backend.app.shared.http.logger.exception') as log_exception,
+        ):
+            send_error(handler, ConnectionAbortedError('client aborted'))
+
+        send_json.assert_not_called()
+        log_exception.assert_not_called()
+
+    def test_error_response_write_disconnect_is_ignored(self):
+        handler = type('Handler', (), {})()
+
+        with (
+            patch('backend.app.shared.http.send_json', side_effect=BrokenPipeError('closed')) as send_json,
+            patch('backend.app.shared.http.logger.exception') as log_exception,
+        ):
+            send_error(handler, ValidationError('bad request'))
+
+        send_json.assert_called_once()
+        log_exception.assert_not_called()
+
+    def test_client_disconnect_detects_socket_errno_variants(self):
+        self.assertTrue(is_client_disconnect(OSError(errno.ECONNRESET, 'reset')))
+        self.assertFalse(is_client_disconnect(OSError(errno.EINVAL, 'invalid')))

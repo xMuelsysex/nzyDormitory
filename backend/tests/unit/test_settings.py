@@ -34,6 +34,14 @@ class SettingsTests(unittest.TestCase):
         with patch.dict('os.environ', {}, clear=True):
             settings = load_settings()
 
+        self.assertEqual(
+            DEFAULT_CAMPUS_WEBVPN_URL,
+            'https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx',
+        )
+        self.assertEqual(
+            DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL,
+            'https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx',
+        )
         self.assertEqual(settings.campus_login_url, DEFAULT_CAMPUS_WEBVPN_URL)
         self.assertEqual(settings.campus_electricity_url, DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL)
 

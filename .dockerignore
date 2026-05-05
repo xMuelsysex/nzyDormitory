@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.trellis
+.agents
+.claude
+__pycache__/
+*.py[cod]
+*.sqlite3
+data/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/

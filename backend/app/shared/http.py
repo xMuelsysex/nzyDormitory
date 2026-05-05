@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import logging
 from datetime import UTC, datetime
@@ -10,6 +11,14 @@ from urllib.parse import parse_qs
 from backend.app.shared.errors import AppError, ValidationError
 
 logger = logging.getLogger(__name__)
+
+_CLIENT_DISCONNECT_ERRNOS = {
+    errno.ECONNABORTED,
+    errno.ECONNRESET,
+    errno.EPIPE,
+    10053,
+    10054,
+}
 
 
 def utc_now_iso() -> str:
@@ -74,9 +83,29 @@ def send_bytes(handler: BaseHTTPRequestHandler, status: int, body: bytes, conten
     handler.wfile.write(body)
 
 
+def is_client_disconnect(error: Exception) -> bool:
+    if isinstance(error, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)):
+        return True
+    if isinstance(error, OSError):
+        return (
+            error.errno in _CLIENT_DISCONNECT_ERRNOS
+            or getattr(error, "winerror", None) in _CLIENT_DISCONNECT_ERRNOS
+        )
+    return False
+
+
 def send_error(handler: BaseHTTPRequestHandler, error: Exception) -> None:
-    if isinstance(error, AppError):
-        send_json(handler, error.status, {"error": {"code": error.code, "message": error.message}})
+    if is_client_disconnect(error):
+        logger.debug("client_disconnected")
         return
-    logger.exception("unexpected_error")
-    send_json(handler, 500, {"error": {"code": "UNEXPECTED_ERROR", "message": "Unexpected server error"}})
+    try:
+        if isinstance(error, AppError):
+            send_json(handler, error.status, {"error": {"code": error.code, "message": error.message}})
+            return
+        logger.exception("unexpected_error")
+        send_json(handler, 500, {"error": {"code": "UNEXPECTED_ERROR", "message": "Unexpected server error"}})
+    except Exception as send_exc:
+        if is_client_disconnect(send_exc):
+            logger.debug("client_disconnected")
+            return
+        raise
