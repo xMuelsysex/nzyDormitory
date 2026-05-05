@@ -3,7 +3,7 @@
   "name": "dorm-electricity-email-alerts",
   "title": "Implement low balance email alerts",
   "description": "Threshold configuration and email notifications for low dorm electricity/balance.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "backend",
   "scope": "email-alerts",
   "package": null,
@@ -19,10 +19,11 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "04-26-dorm-electricity-monitor",
+  "parent": null,
   "relatedFiles": [
-    "task.md"
+    "backend/app/alerts/email_alerts.py",
+    "frontend/src/index.html"
   ],
-  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "notes": "Implemented as part of initial dorm-electricity-monitor full-stack pass.",
   "meta": {}
 }

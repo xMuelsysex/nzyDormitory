@@ -4,51 +4,68 @@
 
 ---
 
-## Overview
+## Current Project State
 
-<!--
-Document your project's backend directory structure here.
-
-Questions to answer:
-- How are modules/packages organized?
-- Where does business logic live?
-- Where are API endpoints defined?
-- How are utilities and helpers organized?
--->
-
-(To be filled by the team)
+This repository is in the planning/bootstrap stage. There is no application backend source tree yet. Requirements are captured in `task.md` and the `04-26-dorm-electricity-*` Trellis PRDs.
 
 ---
 
-## Directory Layout
+## Required Backend Layout
 
+When backend code is introduced, use a feature-oriented layout with clear boundaries between API, integration, scheduling, persistence, and alerting logic.
+
+```text
+backend/
+├── app/
+│   ├── main.*
+│   ├── config/
+│   ├── routes/
+│   ├── services/
+│   ├── integrations/
+│   ├── scheduler/
+│   ├── persistence/
+│   ├── alerts/
+│   └── shared/
+└── tests/
+    ├── unit/
+    └── integration/
 ```
-<!-- Replace with your actual structure -->
-src/
-├── ...
-└── ...
-```
+
+If the chosen stack uses `src/`, keep the same internal separation under that root.
 
 ---
 
 ## Module Organization
 
-<!-- How should new features/modules be organized? -->
-
-(To be filled by the team)
+- `routes/` validates input, calls services, and returns responses only.
+- `services/` owns use cases such as room selection, schedule updates, reading history, and alert settings.
+- `integrations/` owns communication with `http://10.80.34.137:92/Default.aspx` and `http://10.80.34.137:92/web/auths/index.aspx`.
+- `scheduler/` owns intervals, active windows, and duplicate-job prevention.
+- `persistence/` owns durable storage and migrations.
+- `alerts/` owns threshold evaluation and email transport.
 
 ---
 
 ## Naming Conventions
 
-<!-- File and folder naming rules -->
-
-(To be filled by the team)
+- Use descriptive domain names such as `electricity_collector`, `schedule_service`, and `email_alert_service`.
+- Avoid vague names such as `utils`, `common`, or `manager` unless the file is truly shared infrastructure.
+- Keep portal HTML parsing separate from HTTP session handling.
+- Keep configuration names explicit: `SMTP_HOST`, `SMTP_PORT`, `ALERT_THRESHOLD`, `POLL_INTERVAL_SECONDS`.
 
 ---
 
 ## Examples
 
-<!-- Link to well-organized modules as examples -->
+- `.trellis/tasks/04-26-dorm-electricity-monitor/prd.md` defines feature boundaries.
+- `.trellis/tasks/04-26-dorm-electricity-scheduler-collector/prd.md` defines scheduler and collector responsibilities.
+- `.trellis/tasks/04-26-dorm-electricity-email-alerts/prd.md` defines alerting responsibilities.
 
-(To be filled by the team)
+---
+
+## Forbidden Patterns
+
+- Do not combine login, scraping, scheduling, persistence, and email sending in one file.
+- Do not hard-code credentials, SMTP secrets, room identifiers, or thresholds.
+- Do not let route handlers directly parse remote HTML or send emails.
+- Do not bypass the campus portal login flow.

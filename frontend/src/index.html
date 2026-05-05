@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>宿舍电费监控</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Dorm Electricity Monitor</p>
+          <h1>宿舍电费监控</h1>
+          <p>登录校园门户后选择宿舍，配置定时采集、电费趋势图和低余额邮件提醒。</p>
+        </div>
+        <div id="statusBadge" class="badge">加载中</div>
+      </header>
+
+      <section class="grid">
+        <div class="card">
+          <h2>1. 登录</h2>
+          <p class="hint">点击按钮进入校园门户登录页完成鉴权；登录成功后会自动回到本页面，失败则停留在校园登录页。</p>
+          <a class="button-link" href="/portal/login">进入校园门户登录</a>
+          <p id="loginMessage" class="message"></p>
+        </div>
+
+        <form id="roomForm" class="card">
+          <h2>2. 选择宿舍</h2>
+          <label>所属楼栋<input name="building" required placeholder="例如：1号楼" /></label>
+          <label>房间<input name="room" required placeholder="例如：301" /></label>
+          <button type="submit">保存宿舍</button>
+          <p id="roomMessage" class="message"></p>
+        </form>
+
+        <form id="scheduleForm" class="card">
+          <h2>3. 定时采集</h2>
+          <label>间隔秒数<input name="intervalSeconds" type="number" min="1" value="3600" required /></label>
+          <label>开始时间<input name="startTime" type="time" value="08:00" required /></label>
+          <label>结束时间<input name="endTime" type="time" value="23:00" required /></label>
+          <label class="inline"><input name="enabled" type="checkbox" checked /> 启用定时采集</label>
+          <button type="submit">保存定时设置</button>
+          <button id="runOnceButton" type="button" class="secondary">立即采集一次</button>
+          <p id="scheduleMessage" class="message"></p>
+        </form>
+
+        <form id="alertForm" class="card">
+          <h2>4. 邮件提醒</h2>
+          <label>阈值<input name="threshold" type="number" step="0.01" value="10" required /></label>
+          <label>提醒邮箱<input name="recipientEmail" type="email" required /></label>
+          <label>冷却秒数<input name="cooldownSeconds" type="number" min="0" value="3600" /></label>
+          <label class="inline"><input name="enabled" type="checkbox" checked /> 启用提醒</label>
+          <button type="submit">保存提醒设置</button>
+          <p id="alertMessage" class="message"></p>
+        </form>
+      </section>
+
+      <section class="card chart-card">
+        <div class="section-title">
+          <div>
+            <h2>电费趋势</h2>
+            <p id="chartSummary" class="hint">定时采集成功后会显示趋势图。</p>
+          </div>
+          <button id="refreshButton" type="button" class="secondary">刷新数据</button>
+        </div>
+        <canvas id="trendCanvas" width="960" height="320" aria-label="电费趋势图"></canvas>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>楼栋</th><th>房间</th><th>数值</th></tr></thead>
+            <tbody id="readingsBody"><tr><td colspan="4">暂无数据</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

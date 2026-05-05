@@ -3,7 +3,7 @@
   "name": "dorm-electricity-auth-room",
   "title": "Implement login and dorm room selection",
   "description": "Campus portal login flow and dorm building/room selection used by monitoring jobs.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "fullstack",
   "scope": "auth-room",
   "package": null,
@@ -19,10 +19,11 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "04-26-dorm-electricity-monitor",
+  "parent": null,
   "relatedFiles": [
-    "task.md"
+    "backend/app/integrations/campus_portal.py",
+    "frontend/src/index.html"
   ],
-  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "notes": "Implemented as part of initial dorm-electricity-monitor full-stack pass.",
   "meta": {}
 }

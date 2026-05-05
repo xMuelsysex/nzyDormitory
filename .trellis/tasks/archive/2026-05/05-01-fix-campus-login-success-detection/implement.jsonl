@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines campus portal proxy login contract, success detection, and tests required."}
+{"file": ".trellis/tasks/05-01-fix-campus-login-success-detection/research/live-campus-portal-login.md", "reason": "Records live ASP.NET WebForms login fields, captcha endpoint behavior, and structural success/failure detection signals."}

@@ -13,23 +13,26 @@
   "subtasks": [
     {
       "name": "Fill backend guidelines",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "name": "Fill frontend guidelines",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "name": "Add code examples",
-      "status": "pending"
+      "status": "completed"
     }
   ],
   "children": [],
   "parent": null,
   "relatedFiles": [
     ".trellis/spec/backend/",
-    ".trellis/spec/frontend/"
+    ".trellis/spec/frontend/",
+    ".trellis/tasks/00-bootstrap-guidelines/implement.jsonl",
+    ".trellis/tasks/00-bootstrap-guidelines/check.jsonl"
   ],
-  "notes": "First-time setup task created by trellis init (fullstack project)",
-  "meta": {}
+  "notes": "Bootstrap guidelines filled from current planning-stage repository state; no application code exists yet, so examples reference Trellis PRDs and task.md.",
+  "meta": {},
+  "package": null
 }

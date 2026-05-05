@@ -6,46 +6,54 @@
 
 ## Overview
 
-<!--
-Document your project's error handling conventions here.
-
-Questions to answer:
-- What error types do you define?
-- How are errors propagated?
-- How are errors logged?
-- How are errors returned to clients?
--->
-
-(To be filled by the team)
+Error handling standards are defined for the planned dorm electricity monitoring app in `task.md` and `.trellis/tasks/04-26-dorm-electricity-monitor/prd.md`.
 
 ---
 
 ## Error Types
 
-<!-- Custom error classes/types -->
+Use explicit categories:
 
-(To be filled by the team)
+- `ValidationError`: invalid schedule, threshold, email, building, or room.
+- `AuthenticationError`: campus login failed or session expired.
+- `PortalFetchError`: electricity portal could not be reached or returned an unexpected response.
+- `PortalParseError`: remote response was received but electricity data could not be extracted.
+- `PersistenceError`: database read/write failed.
+- `EmailDeliveryError`: alert email could not be sent.
+- `SchedulerError`: job registration, cancellation, or execution failed.
 
 ---
 
 ## Error Handling Patterns
 
-<!-- Try-catch patterns, error propagation -->
-
-(To be filled by the team)
+- Validate user input at the API boundary.
+- Convert low-level exceptions into domain-specific errors before crossing service boundaries.
+- Scheduler jobs must catch and record failures so future runs continue.
+- Log safe diagnostic details and surface user-safe messages.
+- Keep retries explicit and bounded.
 
 ---
 
 ## API Error Responses
 
-<!-- Standard error response format -->
+Use a stable response shape once APIs exist:
 
-(To be filled by the team)
+```json
+{
+  "error": {
+    "code": "PORTAL_SESSION_EXPIRED",
+    "message": "The campus portal session has expired. Please log in again."
+  }
+}
+```
+
+Never include passwords, cookies, SMTP credentials, raw stack traces, or full remote HTML.
 
 ---
 
 ## Common Mistakes
 
-<!-- Error handling mistakes your team has made -->
-
-(To be filled by the team)
+- Returning raw exceptions to the browser.
+- Logging credentials, session cookies, or SMTP secrets.
+- Treating a changed portal HTML structure as a generic network failure.
+- Letting email alert failures block storage of successful electricity readings.

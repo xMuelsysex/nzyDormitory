@@ -3,7 +3,7 @@
   "name": "dorm-electricity-monitor",
   "title": "Build dorm electricity monitoring web app",
   "description": "Full-stack Ubuntu-deployed web app for authorized dorm electricity polling, trend visualization, and low-balance email alerts.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": "fullstack",
   "scope": "fullstack",
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "Muelsyse",
   "assignee": "Muelsyse",
   "createdAt": "2026-04-26",
-  "completedAt": null,
+  "completedAt": "2026-05-01",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -20,31 +20,35 @@
   "subtasks": [
     {
       "name": "Login and dorm room selection",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "name": "Scheduled electricity collection",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "name": "Trend visualization",
-      "status": "pending"
+      "status": "completed"
     },
     {
       "name": "Low balance email alerts",
-      "status": "pending"
+      "status": "completed"
     }
   ],
   "children": [
     "04-26-dorm-electricity-auth-room",
     "04-26-dorm-electricity-scheduler-collector",
     "04-26-dorm-electricity-trend-chart",
-    "04-26-dorm-electricity-email-alerts"
+    "04-26-dorm-electricity-email-alerts",
+    "04-26-dorm-electricity-portal-research"
   ],
   "parent": null,
   "relatedFiles": [
-    "task.md"
+    "README.md",
+    "backend/",
+    "frontend/",
+    ".trellis/tasks/04-26-dorm-electricity-monitor/prd.md"
   ],
-  "notes": "Created from root task.md requirement on 2026-04-26.",
+  "notes": "Initial full-stack implementation completed with Python stdlib backend, SQLite persistence, native frontend, scheduler, parser, and email alert service.",
   "meta": {}
 }

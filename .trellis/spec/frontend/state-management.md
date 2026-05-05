@@ -6,46 +6,37 @@
 
 ## Overview
 
-<!--
-Document your project's state management conventions here.
-
-Questions to answer:
-- What state management solution do you use?
-- How is local vs global state decided?
-- How do you handle server state?
-- What are the patterns for derived state?
--->
-
-(To be filled by the team)
+No global state library has been selected yet. Start with the simplest state model and promote state only when multiple features need it.
 
 ---
 
 ## State Categories
 
-<!-- Local state, global state, server state, URL state -->
-
-(To be filled by the team)
+- Local UI state: form fields, validation messages, modal visibility.
+- Server state: login/session status, room selection, schedule config, readings, alert config.
+- Derived state: latest reading, below-threshold status, chart trend direction.
+- URL state: optional filters such as date ranges if added later.
 
 ---
 
 ## When to Use Global State
 
-<!-- Criteria for promoting state to global -->
-
-(To be filled by the team)
+Use global state only when the same state is consumed across multiple distant features, such as current room selection or session status. Otherwise keep state local or server-backed.
 
 ---
 
 ## Server State
 
-<!-- How server data is cached and synchronized -->
-
-(To be filled by the team)
+- Treat persisted backend data as the source of truth.
+- Refresh chart data after collection runs or on user request.
+- Avoid duplicating server state in multiple unrelated local stores.
+- Represent session expiration explicitly so the UI can ask the user to log in again.
 
 ---
 
 ## Common Mistakes
 
-<!-- State management mistakes your team has made -->
-
-(To be filled by the team)
+- Creating global state before it is needed.
+- Storing secrets in browser state or local storage.
+- Duplicating schedule config in multiple components without synchronization.
+- Computing alert status from stale readings.
