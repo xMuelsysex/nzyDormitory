@@ -15,6 +15,10 @@ from backend.app.shared.errors import AuthenticationError, PortalFetchError, Por
 from backend.app.shared.http import utc_now_iso
 
 
+_NJUCM_WEBVPN_HOST = "webvpn.njucm.edu.cn"
+_NJUCM_CAS_ASSET_HOST = "ids.njucm.edu.cn"
+
+
 @dataclass(frozen=True)
 class LoginSubmission:
     url: str
@@ -337,6 +341,19 @@ def _absolute_portal_url(value: str, base_url: str, *, webvpn_root_assets_from_b
     stripped = value.strip()
     if stripped.startswith("/") and not stripped.startswith("//"):
         parsed = urlparse(base_url)
+        if (
+            webvpn_root_assets_from_base
+            and _is_njucm_webvpn_cas_login_url(base_url)
+            and _looks_like_root_static_asset(stripped)
+        ):
+            return parsed._replace(
+                scheme="https",
+                netloc=_NJUCM_CAS_ASSET_HOST,
+                path=stripped,
+                params="",
+                query="",
+                fragment="",
+            ).geturl()
         gateway_prefix = _webvpn_gateway_prefix(parsed.path)
         if gateway_prefix and not stripped.startswith(f"{gateway_prefix}/"):
             if webvpn_root_assets_from_base and _looks_like_root_static_asset(stripped):
@@ -356,13 +373,29 @@ def _looks_like_root_static_asset(path: str) -> bool:
     return first_segment in {"css", "favicon.ico", "images", "img", "js", "scripts", "themes"}
 
 
+def _is_njucm_webvpn_cas_login_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.hostname == _NJUCM_WEBVPN_HOST and parsed.path.rstrip("/").lower() == "/login"
+
+
+def _is_njucm_cas_asset_target(target: str, context_urls: tuple[str, ...]) -> bool:
+    parsed = urlparse(target)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == _NJUCM_CAS_ASSET_HOST
+        and _looks_like_root_static_asset(parsed.path)
+        and any(_is_njucm_webvpn_cas_login_url(url) for url in context_urls if url)
+    )
+
+
 def _is_allowed_portal_url(target: str, login_url: str, extra_allowed_urls: tuple[str, ...] = ()) -> bool:
     parsed_target = urlparse(target)
     if parsed_target.scheme not in {"http", "https"}:
         return False
     target_host = parsed_target.netloc
     allowed_hosts = {urlparse(url).netloc for url in (login_url, *extra_allowed_urls) if url}
-    return bool(target_host) and target_host in allowed_hosts
+    context_urls = (login_url, *extra_allowed_urls)
+    return bool(target_host) and (target_host in allowed_hosts or _is_njucm_cas_asset_target(target, context_urls))
 
 
 def _escape_attr(value: str) -> str:
