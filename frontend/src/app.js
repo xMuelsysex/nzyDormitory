@@ -49,11 +49,16 @@ function setMessage(id, message, isError = false) {
 
 async function refreshStatus() {
   const status = await api.get('/api/status');
-  const parts = [status.authenticated ? '已登录' : '未登录'];
+  const parts = [authenticationStatusLabel(status)];
   if (status.roomSelection) parts.push(`${status.roomSelection.building} ${status.roomSelection.room}`);
   statusBadge.textContent = parts.join(' · ');
   applySavedConfig(status);
   updateControlStates(status);
+}
+
+function authenticationStatusLabel(status) {
+  if (status.authenticationStatus === 'session_expired') return '登录已过期';
+  return status.authenticated ? '已登录' : '未登录';
 }
 
 async function refreshReadings() {
@@ -154,9 +159,12 @@ function updateControlStates(status) {
   setFormDisabled(alertForm, loginRequired);
   runOnceButton.disabled = loginRequired || roomRequired;
   if (loginRequired) {
-    setMessage('#roomMessage', '请先完成校园门户登录。', true);
-    setMessage('#scheduleMessage', '登录并选择宿舍后才能配置定时采集。', true);
-    setMessage('#alertMessage', '登录后才能配置邮件提醒。', true);
+    const loginMessage = status.authenticationStatus === 'session_expired'
+      ? '校园门户登录已过期，请重新登录。'
+      : '请先完成校园门户登录。';
+    setMessage('#roomMessage', loginMessage, true);
+    setMessage('#scheduleMessage', status.authenticationStatus === 'session_expired' ? loginMessage : '登录并选择宿舍后才能配置定时采集。', true);
+    setMessage('#alertMessage', status.authenticationStatus === 'session_expired' ? loginMessage : '登录后才能配置邮件提醒。', true);
     return;
   }
   if (roomRequired) {

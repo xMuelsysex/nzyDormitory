@@ -7,7 +7,7 @@ import threading
 from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.integrations.campus_portal import CampusPortalClient
 from backend.app.persistence.repository import Repository
-from backend.app.shared.errors import AppError, AuthenticationError, SchedulerError
+from backend.app.shared.errors import AppError, AuthenticationError, SchedulerError, SessionExpiredError
 from backend.app.shared.http import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ class CollectionScheduler:
         if selection is None:
             raise SchedulerError("Room selection is required before collection.")
         if not self.portal.authenticated:
+            if getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired":
+                raise SessionExpiredError("Campus portal session expired. Please log in again.")
             raise AuthenticationError("Campus portal login is required before collection.")
         reading = self.portal.fetch_reading(selection)
         self.repository.insert_reading(reading)

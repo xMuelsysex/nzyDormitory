@@ -20,6 +20,10 @@ class AuthenticationError(AppError):
     status = 401
 
 
+class SessionExpiredError(AuthenticationError):
+    code = "SESSION_EXPIRED"
+
+
 class PortalFetchError(AppError):
     code = "PORTAL_FETCH_ERROR"
     status = 502

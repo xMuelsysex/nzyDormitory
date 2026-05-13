@@ -11,7 +11,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from backend.app.config.settings import Settings
 from backend.app.services.models import ElectricityReading, RoomSelection
-from backend.app.shared.errors import AuthenticationError, PortalFetchError, PortalParseError
+from backend.app.shared.errors import AuthenticationError, PortalFetchError, PortalParseError, SessionExpiredError
 from backend.app.shared.http import utc_now_iso
 
 
@@ -40,6 +40,7 @@ class CampusPortalClient:
         self.cookie_jar = CookieJar()
         self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
         self.authenticated = False
+        self.authentication_status = "unauthenticated"
         self._login_page_url = settings.campus_login_url
 
     def load_login_page(self) -> str:
@@ -115,9 +116,11 @@ class CampusPortalClient:
             body, response_url = frame_login
         if _looks_like_login_failure(body) or _looks_like_login_page(body) or not _looks_like_authenticated_page(body):
             self.authenticated = False
+            self.authentication_status = "unauthenticated"
             self._login_page_url = response_url
             return False, rewrite_login_page(body, response_url)
         self.authenticated = True
+        self.authentication_status = "authenticated"
         return True, ""
 
     def _fetch_frame_login_page(self, body: str, response_url: str) -> tuple[str, str] | None:
@@ -165,15 +168,19 @@ class CampusPortalClient:
         if _looks_like_login_failure(body):
             raise AuthenticationError("Campus login failed. Please verify credentials or import a browser session cookie.")
         self.authenticated = True
+        self.authentication_status = "authenticated"
 
     def import_cookies(self, cookie_header: str) -> None:
         imported = import_cookie_header(self.cookie_jar, cookie_header, self.settings.campus_login_url)
         if imported == 0:
             raise AuthenticationError("No valid cookies were found in the provided cookie header.")
         self.authenticated = True
+        self.authentication_status = "authenticated"
 
     def fetch_reading(self, selection: RoomSelection) -> ElectricityReading:
         if not self.authenticated:
+            if self.authentication_status == "session_expired":
+                raise SessionExpiredError("Campus portal session expired. Please log in again.")
             raise AuthenticationError("Campus portal login is required before collection.")
         try:
             electricity_url = self.settings.campus_electricity_url
@@ -184,7 +191,8 @@ class CampusPortalClient:
         diagnosis = diagnose_portal_response(body)
         if diagnosis.kind == "login_page":
             self.authenticated = False
-            raise AuthenticationError("Campus portal session expired or login did not complete. Please log in again.")
+            self.authentication_status = "session_expired"
+            raise SessionExpiredError("Campus portal session expired. Please log in again.")
         if diagnosis.kind != "electricity_page":
             raise PortalParseError(diagnosis.message)
         fields = build_fee_elect_query_fields(body, selection)
@@ -206,7 +214,8 @@ class CampusPortalClient:
         diagnosis = diagnose_portal_response(body)
         if diagnosis.kind == "login_page":
             self.authenticated = False
-            raise AuthenticationError("Campus portal session expired or login did not complete. Please log in again.")
+            self.authentication_status = "session_expired"
+            raise SessionExpiredError("Campus portal session expired. Please log in again.")
         if diagnosis.kind != "electricity_page":
             raise PortalParseError(diagnosis.message)
         value, unit = parse_electricity_value(body)

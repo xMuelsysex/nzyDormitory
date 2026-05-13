@@ -39,6 +39,7 @@ class MonitorService:
     def status(self) -> dict[str, object]:
         return {
             "authenticated": self.portal.authenticated,
+            "authenticationStatus": getattr(self.portal, "authentication_status", "authenticated" if self.portal.authenticated else "unauthenticated"),
             "roomSelection": room_to_payload(self.repository.get_room_selection()),
             "scheduleConfig": schedule_to_payload(self.repository.get_schedule_config()),
             "alertConfig": alert_to_payload(self.repository.get_alert_config()),

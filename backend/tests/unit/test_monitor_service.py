@@ -62,3 +62,12 @@ class MonitorServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(scheduler.restarted)
+
+    def test_status_exposes_session_expired_authentication_state(self):
+        service, _ = self.make_service(authenticated=False)
+        service.portal.authentication_status = "session_expired"
+
+        status = service.status()
+
+        self.assertFalse(status["authenticated"])
+        self.assertEqual(status["authenticationStatus"], "session_expired")
