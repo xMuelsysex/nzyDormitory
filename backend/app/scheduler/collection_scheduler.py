@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 import logging
 import threading
 
@@ -40,22 +40,52 @@ class CollectionScheduler:
         selection = self.repository.get_room_selection()
         if selection is None:
             raise SchedulerError("Room selection is required before collection.")
-        if not self.portal.authenticated:
-            raise AuthenticationError("Campus portal login is required before collection.")
-        reading = self.portal.fetch_reading(selection)
-        self.repository.insert_reading(reading)
-        alert_sent = self.alerts.evaluate(reading)
-        logger.info("collection_success", extra={"building": reading.building, "room": reading.room})
-        return {
-            "reading": {
-                "collectedAt": reading.collected_at,
-                "building": reading.building,
-                "room": reading.room,
-                "numericValue": reading.numeric_value,
-                "unit": reading.unit,
-            },
-            "alertSent": alert_sent,
-        }
+        started_at = utc_now_iso()
+        collection_window_start = self._collection_window_start()
+        run_id = self.repository.start_collection_run(selection, started_at, collection_window_start)
+        reading_inserted = False
+        try:
+            if not self.portal.authenticated:
+                raise AuthenticationError("Campus portal login is required before collection.")
+            reading = self.portal.fetch_reading(selection)
+            reading_inserted = self.repository.insert_reading(reading, collection_window_start, run_id)
+            alert_sent = self.alerts.evaluate(reading) if reading_inserted else False
+            run_status = "success" if reading_inserted else "duplicate"
+            self.repository.finish_collection_run(run_id, utc_now_iso(), run_status, reading_inserted)
+            logger.info(
+                "collection_success",
+                extra={"building": reading.building, "room": reading.room, "reading_inserted": reading_inserted},
+            )
+            return {
+                "reading": {
+                    "collectedAt": reading.collected_at,
+                    "building": reading.building,
+                    "room": reading.room,
+                    "numericValue": reading.numeric_value,
+                    "unit": reading.unit,
+                },
+                "alertSent": alert_sent,
+            }
+        except AppError as exc:
+            self.repository.finish_collection_run(
+                run_id,
+                utc_now_iso(),
+                "failed",
+                reading_inserted,
+                exc.code,
+                exc.message,
+            )
+            raise
+        except Exception:
+            self.repository.finish_collection_run(
+                run_id,
+                utc_now_iso(),
+                "failed",
+                reading_inserted,
+                "UNEXPECTED_ERROR",
+                "Unexpected collection failure.",
+            )
+            raise
 
     def _run_and_reschedule(self) -> None:
         try:
@@ -80,6 +110,14 @@ class CollectionScheduler:
             return False
         now = datetime.now(self.timezone).strftime("%H:%M")
         return config.start_time <= now <= config.end_time
+
+    def _collection_window_start(self) -> str:
+        config = self.repository.get_schedule_config()
+        interval_seconds = max(1, config.interval_seconds if config else 1)
+        now = datetime.now(UTC).replace(microsecond=0)
+        epoch_seconds = int(now.timestamp())
+        window_epoch = epoch_seconds - (epoch_seconds % interval_seconds)
+        return datetime.fromtimestamp(window_epoch, UTC).isoformat().replace("+00:00", "Z")
 
     def _cancel_locked(self) -> None:
         if self._timer is not None:
