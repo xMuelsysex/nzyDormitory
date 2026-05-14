@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/marketplace-adapted-contracts.md", "reason": "API, service, persistence, and validation contracts for backend pagination changes."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "SQLite history query, migration, and stable ordering rules for collection history."}
+{"file": ".trellis/spec/frontend/marketplace-adapted-patterns.md", "reason": "Frontend server-state ownership, loading/error states, and chart/table consumption rules."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "The task changes database, API contract, service payload, and frontend consumption together."}
