@@ -44,6 +44,7 @@ class CollectionScheduler:
         collection_window_start = self._collection_window_start()
         run_id = self.repository.start_collection_run(selection, started_at, collection_window_start)
         reading_inserted = False
+        run_finalized = False
         try:
             if not self.portal.authenticated:
                 if getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired":
@@ -51,42 +52,40 @@ class CollectionScheduler:
                 raise AuthenticationError("Campus portal login is required before collection.")
             reading = self.portal.fetch_reading(selection)
             reading_inserted = self.repository.insert_reading(reading, collection_window_start, run_id)
-            alert_sent = self.alerts.evaluate(reading) if reading_inserted else False
             run_status = "success" if reading_inserted else "duplicate"
             self.repository.finish_collection_run(run_id, utc_now_iso(), run_status, reading_inserted)
+            run_finalized = True
             logger.info(
                 "collection_success",
                 extra={"building": reading.building, "room": reading.room, "reading_inserted": reading_inserted},
             )
+            alert_sent = self.alerts.evaluate(reading) if reading_inserted else False
+            stored_reading = self.repository.get_latest_successful_reading()
             return {
-                "reading": {
-                    "collectedAt": reading.collected_at,
-                    "building": reading.building,
-                    "room": reading.room,
-                    "numericValue": reading.numeric_value,
-                    "unit": reading.unit,
-                },
+                "reading": stored_reading,
                 "alertSent": alert_sent,
             }
         except AppError as exc:
-            self.repository.finish_collection_run(
-                run_id,
-                utc_now_iso(),
-                "failed",
-                reading_inserted,
-                exc.code,
-                exc.message,
-            )
+            if not run_finalized:
+                self.repository.finish_collection_run(
+                    run_id,
+                    utc_now_iso(),
+                    "failed",
+                    reading_inserted,
+                    exc.code,
+                    exc.message,
+                )
             raise
         except Exception:
-            self.repository.finish_collection_run(
-                run_id,
-                utc_now_iso(),
-                "failed",
-                reading_inserted,
-                "UNEXPECTED_ERROR",
-                "Unexpected collection failure.",
-            )
+            if not run_finalized:
+                self.repository.finish_collection_run(
+                    run_id,
+                    utc_now_iso(),
+                    "failed",
+                    reading_inserted,
+                    "UNEXPECTED_ERROR",
+                    "Unexpected collection failure.",
+                )
             raise
 
     def _run_and_reschedule(self) -> None:
@@ -98,6 +97,9 @@ class CollectionScheduler:
         except AppError as exc:
             self.repository.record_failure(utc_now_iso(), exc.code, exc.message)
             logger.warning("collection_failed", extra={"error_code": exc.code})
+        except Exception:
+            self.repository.record_failure(utc_now_iso(), "UNEXPECTED_ERROR", "Unexpected collection failure.")
+            logger.exception("collection_failed", extra={"error_code": "UNEXPECTED_ERROR"})
         finally:
             with self._lock:
                 config = self.repository.get_schedule_config()

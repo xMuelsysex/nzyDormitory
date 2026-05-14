@@ -172,21 +172,28 @@ class Repository:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT collected_at, building, room, numeric_value, unit
-                FROM electricity_readings ORDER BY collected_at DESC LIMIT ?
+                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit
+                FROM electricity_readings er
+                LEFT JOIN collection_runs cr ON cr.id = er.collection_run_id
+                WHERE cr.id IS NULL OR cr.status = 'success'
+                ORDER BY er.collected_at DESC, er.id DESC LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
-        return [
-            {
-                "collectedAt": row["collected_at"],
-                "building": row["building"],
-                "room": row["room"],
-                "numericValue": row["numeric_value"],
-                "unit": row["unit"],
-            }
-            for row in reversed(rows)
-        ]
+        return [self._reading_to_payload(row) for row in reversed(rows)]
+
+    def get_latest_successful_reading(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit
+                FROM electricity_readings er
+                LEFT JOIN collection_runs cr ON cr.id = er.collection_run_id
+                WHERE cr.id IS NULL OR cr.status = 'success'
+                ORDER BY er.collected_at DESC, er.id DESC LIMIT 1
+                """
+            ).fetchone()
+        return None if row is None else self._reading_to_payload(row)
 
     def save_alert_config(self, config: AlertConfig, updated_at: str) -> None:
         with self.connect() as conn:
@@ -264,20 +271,35 @@ class Repository:
                 """,
                 (limit,),
             ).fetchall()
-        return [
-            {
-                "startedAt": row["started_at"],
-                "finishedAt": row["finished_at"],
-                "collectionWindowStart": row["collection_window_start"],
-                "status": row["status"],
-                "errorCode": row["error_code"],
-                "message": row["message"],
-                "readingInserted": bool(row["reading_inserted"]),
-                "building": row["building"],
-                "room": row["room"],
-            }
-            for row in reversed(rows)
-        ]
+        return [self._collection_run_to_payload(row) for row in reversed(rows)]
+
+    def get_latest_collection_run(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT cr.started_at, cr.finished_at, cr.collection_window_start, cr.status,
+                       cr.error_code, cr.message, cr.reading_inserted, r.building, r.room
+                FROM collection_runs cr
+                LEFT JOIN rooms r ON r.id = cr.room_id
+                ORDER BY cr.id DESC LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return self._collection_run_to_payload(row)
+
+    def _collection_run_to_payload(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "startedAt": row["started_at"],
+            "finishedAt": row["finished_at"],
+            "collectionWindowStart": row["collection_window_start"],
+            "status": row["status"],
+            "errorCode": row["error_code"],
+            "message": row["message"],
+            "readingInserted": bool(row["reading_inserted"]),
+            "building": row["building"],
+            "room": row["room"],
+        }
 
     def record_failure(self, failed_at: str, error_code: str, message: str) -> None:
         with self.connect() as conn:
@@ -329,3 +351,12 @@ class Repository:
             (selection.building, selection.room),
         ).fetchone()
         return int(row["id"])
+
+    def _reading_to_payload(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "collectedAt": row["collected_at"],
+            "building": row["building"],
+            "room": row["room"],
+            "numericValue": row["numeric_value"],
+            "unit": row["unit"],
+        }

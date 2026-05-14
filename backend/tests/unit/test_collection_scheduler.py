@@ -7,7 +7,7 @@ from unittest.mock import patch
 from backend.app.persistence.repository import Repository
 from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.services.models import ElectricityReading, RoomSelection, ScheduleConfig
-from backend.app.shared.errors import SessionExpiredError
+from backend.app.shared.errors import EmailDeliveryError, SessionExpiredError
 
 
 class FakePortal:
@@ -36,9 +36,24 @@ class FakePortal:
         self.expire_next_fetch = False
 
 
+class BrokenPortal(FakePortal):
+    def fetch_reading(self, selection):
+        raise RuntimeError("boom")
+
+
 class FakeAlerts:
+    def __init__(self):
+        self.evaluations = 0
+
     def evaluate(self, reading):
+        self.evaluations += 1
         return False
+
+
+class BrokenAlerts(FakeAlerts):
+    def evaluate(self, reading):
+        self.evaluations += 1
+        raise EmailDeliveryError("SMTP settings are not configured.")
 
 
 class FakeTimer:
@@ -70,7 +85,8 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
             "2026-05-13T00:00:00Z",
         )
         self.portal = FakePortal()
-        self.scheduler = CollectionScheduler(self.repository, self.portal, FakeAlerts(), UTC)
+        self.alerts = FakeAlerts()
+        self.scheduler = CollectionScheduler(self.repository, self.portal, self.alerts, UTC)
 
     def test_expired_session_records_failure_and_keeps_future_schedule(self):
         self.portal.expire_next_fetch = True
@@ -107,6 +123,7 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         self.assertEqual(len(runs), 2)
         self.assertEqual(runs[1]["status"], "success")
         self.assertTrue(runs[1]["readingInserted"])
+        self.assertEqual(self.repository.get_latest_successful_reading()["numericValue"], 20.93)
 
     def test_database_initializes_minimal_foundation_tables(self):
         with self.repository.connect() as conn:
@@ -133,10 +150,66 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         self.assertFalse(first["alertSent"])
         self.assertFalse(second["alertSent"])
         self.assertEqual(len(self.repository.list_readings()), 1)
+        self.assertEqual(self.alerts.evaluations, 1)
 
         runs = self.repository.list_collection_runs()
         self.assertEqual([run["status"] for run in runs], ["success", "duplicate"])
         self.assertEqual([run["readingInserted"] for run in runs], [True, False])
+
+    def test_alert_failure_does_not_hide_successful_history_reading(self):
+        scheduler = CollectionScheduler(self.repository, self.portal, BrokenAlerts(), UTC)
+
+        with self.assertRaises(EmailDeliveryError):
+            scheduler.run_once()
+
+        readings = self.repository.list_readings()
+        self.assertEqual(len(readings), 1)
+        self.assertEqual(readings[0]["numericValue"], 20.93)
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(runs[-1]["status"], "success")
+        self.assertTrue(runs[-1]["readingInserted"])
+
+    def test_run_once_returns_database_latest_successful_reading(self):
+        self.repository.insert_reading(
+            ElectricityReading(
+                collected_at="2026-05-13T01:00:00Z",
+                building="C20",
+                room="2324",
+                numeric_value=18.5,
+                unit="元",
+            ),
+            "2026-05-13T00:00:00Z",
+        )
+
+        with patch.object(
+            self.scheduler,
+            "_collection_window_start",
+            return_value="2026-05-13T00:00:00Z",
+        ):
+            result = self.scheduler.run_once()
+
+        self.assertEqual(result["reading"]["numericValue"], 18.5)
+        self.assertEqual(len(self.repository.list_readings()), 1)
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(runs[-1]["status"], "duplicate")
+        self.assertFalse(runs[-1]["readingInserted"])
+
+    def test_scheduled_unexpected_failure_records_brief_status(self):
+        scheduler = CollectionScheduler(self.repository, BrokenPortal(), self.alerts, UTC)
+
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            scheduler._run_and_reschedule()
+
+        failures = self._failures()
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["error_code"], "UNEXPECTED_ERROR")
+        self.assertEqual(failures[0]["message"], "Unexpected collection failure.")
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(runs[-1]["status"], "failed")
+        self.assertEqual(runs[-1]["errorCode"], "UNEXPECTED_ERROR")
 
     def _failures(self):
         with self.repository.connect() as conn:
