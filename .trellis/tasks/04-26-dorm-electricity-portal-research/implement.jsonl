@@ -1,6 +1,0 @@
-{"file":"task.md","reason":"Original dorm electricity monitoring requirement and source portal URLs"}
-{"file":".trellis/tasks/04-26-dorm-electricity-portal-research/prd.md","reason":"Portal research scope, evidence rules, and exit criteria"}
-{"file":"backend/app/integrations/campus_portal.py","reason":"Current login/session/electricity integration boundary to validate against real portal behavior"}
-{"file":"backend/tests/unit/test_campus_portal.py","reason":"Parser and portal behavior tests to update from sanitized real evidence"}
-{"file":"backend/app/config/settings.py","reason":"Campus URL configuration defaults and env overrides"}
-{"file":".trellis/tasks/04-26-dorm-electricity-portal-research/research-findings.jsonl","reason":"Sanitized evidence log for source portal inspection"}

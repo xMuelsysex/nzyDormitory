@@ -1,3 +1,0 @@
-{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
-{"file": ".trellis/spec/backend/", "type": "directory", "reason": "Guidelines to fill for backend layer"}
-{"file": ".trellis/spec/frontend/", "type": "directory", "reason": "Guidelines to fill for frontend layer"}

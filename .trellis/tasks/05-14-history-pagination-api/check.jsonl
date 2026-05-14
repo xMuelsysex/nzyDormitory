@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/marketplace-adapted-contracts.md", "reason": "Verify backend API, service, validation, and persistence contract compliance."}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify pagination query behavior stays compatible with SQLite history contracts."}
-{"file": ".trellis/spec/frontend/marketplace-adapted-patterns.md", "reason": "Verify frontend no longer treats bounded server data as full local state."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify the pagination contract is consistent across database, API, service, and UI layers."}

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/marketplace-adapted-contracts.md", "reason": "Backend API/service/scheduler/persistence/error-boundary contracts for implementing collection persistence."}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "SQLite schema, migration, collection history, dedupe, and latest-reading persistence rules."}
