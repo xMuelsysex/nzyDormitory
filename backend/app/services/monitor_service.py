@@ -39,13 +39,19 @@ class MonitorService:
     def status(self) -> dict[str, object]:
         return {
             "authenticated": self.portal.authenticated,
+            "authenticationStatus": getattr(self.portal, "authentication_status", "authenticated" if self.portal.authenticated else "unauthenticated"),
             "roomSelection": room_to_payload(self.repository.get_room_selection()),
             "scheduleConfig": schedule_to_payload(self.repository.get_schedule_config()),
             "alertConfig": alert_to_payload(self.repository.get_alert_config()),
+            "currentReading": self.repository.get_latest_successful_reading(),
+            "lastCollectionRun": self.repository.get_latest_collection_run(),
         }
 
     def readings(self) -> dict[str, object]:
-        return {"readings": self.repository.list_readings()}
+        return {
+            "readings": self.repository.list_readings(),
+            "currentReading": self.repository.get_latest_successful_reading(),
+        }
 
     def run_once(self) -> dict[str, object]:
         return self.scheduler.run_once()

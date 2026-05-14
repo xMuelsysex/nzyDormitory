@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 data/
 .env
+
+# Local tool, skill, and workspace directories.
+# Keep project-level dotfiles trackable, but ignore dot-prefixed folders.
+.*/
+!.gitignore
+!.dockerignore

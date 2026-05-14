@@ -16,7 +16,7 @@ from backend.app.integrations.campus_portal import (
 )
 from backend.app.config.settings import Settings
 from pathlib import Path
-from backend.app.shared.errors import PortalParseError
+from backend.app.shared.errors import PortalParseError, SessionExpiredError
 from backend.app.services.models import RoomSelection
 
 
@@ -571,6 +571,37 @@ class CampusPortalParserTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(body, '')
         self.assertTrue(client.authenticated)
+        self.assertEqual(client.authentication_status, 'authenticated')
+
+    def test_submit_login_page_restores_authenticated_status_after_session_expiry(self):
+        client = CampusPortalClient(test_settings())
+        client.authenticated = False
+        client.authentication_status = 'session_expired'
+        client.opener = FakePortalOpener('<nav>修改密码</nav><main>账号管理中心</main><a>退出</a>')
+
+        success, body = client.submit_login_page({
+            '__portal_action': 'http://portal.test/Default.aspx',
+            'UserName': 'student',
+            'UserPwd': 'secret',
+            'InputCode': '1234',
+        })
+
+        self.assertTrue(success)
+        self.assertEqual(body, '')
+        self.assertTrue(client.authenticated)
+        self.assertEqual(client.authentication_status, 'authenticated')
+
+    def test_fetch_reading_marks_login_page_as_session_expired(self):
+        client = CampusPortalClient(test_settings())
+        client.authenticated = True
+        client.authentication_status = 'authenticated'
+        client.opener = FakePortalOpener('<input name="UserPwd" type="password" /><input name="InputCode" />')
+
+        with self.assertRaises(SessionExpiredError):
+            client.fetch_reading(RoomSelection(building='C20', room='2324'))
+
+        self.assertFalse(client.authenticated)
+        self.assertEqual(client.authentication_status, 'session_expired')
 
     def test_submit_login_page_keeps_proxying_after_cas_success_returns_portal_login(self):
         settings = test_settings()

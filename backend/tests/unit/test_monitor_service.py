@@ -4,6 +4,7 @@ from pathlib import Path
 
 from backend.app.persistence.repository import Repository
 from backend.app.services.monitor_service import MonitorService
+from backend.app.services.models import ElectricityReading
 from backend.app.shared.errors import AuthenticationError, ValidationError
 
 
@@ -62,3 +63,33 @@ class MonitorServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(scheduler.restarted)
+
+    def test_status_exposes_session_expired_authentication_state(self):
+        service, _ = self.make_service(authenticated=False)
+        service.portal.authentication_status = "session_expired"
+
+        status = service.status()
+
+        self.assertFalse(status["authenticated"])
+        self.assertEqual(status["authenticationStatus"], "session_expired")
+
+    def test_status_and_readings_expose_database_current_reading(self):
+        service, _ = self.make_service(authenticated=False)
+        service.repository.insert_reading(
+            ElectricityReading(
+                collected_at="2026-05-13T00:00:00Z",
+                building="C20",
+                room="2324",
+                numeric_value=20.93,
+                unit="元",
+            ),
+            "2026-05-13T00:00:00Z",
+        )
+
+        status = service.status()
+        readings = service.readings()
+
+        self.assertEqual(status["currentReading"]["numericValue"], 20.93)
+        self.assertIsNone(status["lastCollectionRun"])
+        self.assertEqual(readings["currentReading"]["numericValue"], 20.93)
+        self.assertEqual(readings["readings"][0]["numericValue"], 20.93)

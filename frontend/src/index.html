@@ -63,11 +63,20 @@
           </div>
           <button id="refreshButton" type="button" class="secondary">刷新数据</button>
         </div>
+        <p id="collectionMessage" class="message collection-message"></p>
         <canvas id="trendCanvas" width="960" height="320" aria-label="电费趋势图"></canvas>
+        <div class="table-toolbar" aria-live="polite">
+          <p id="readingsMessage" class="message table-message">历史数据加载中。</p>
+          <div class="pagination-controls" aria-label="历史数据分页">
+            <button id="previousPageButton" type="button" class="secondary">上一页</button>
+            <span id="pageInfo" class="page-info">第 1 页</span>
+            <button id="nextPageButton" type="button" class="secondary">下一页</button>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>时间</th><th>楼栋</th><th>房间</th><th>数值</th></tr></thead>
-            <tbody id="readingsBody"><tr><td colspan="4">暂无数据</td></tr></tbody>
+            <tbody id="readingsBody"><tr><td colspan="4">历史数据加载中。</td></tr></tbody>
           </table>
         </div>
       </section>
