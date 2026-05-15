@@ -431,6 +431,85 @@ class CampusPortalParserTests(unittest.TestCase):
         with self.assertRaises(Exception):
             client.fetch_proxy_resource('/portal/proxy?url=https%3A%2F%2Fevil.test%2Fjs%2Fjquery.js')
 
+    def test_rewrite_login_page_maps_njucm_webvpn_cas_root_assets_to_ids_host(self):
+        page = '''
+        <html>
+          <head>
+            <script src=/js/jquery-3.4.1.min.js></script>
+            <link href="/themes/sudy_default/login.css" rel="stylesheet" />
+            <link href=/images/logo.png rel=preload />
+            <link href=/favicon.ico rel=icon />
+          </head>
+          <body>
+            <form action="/login?service=https://webvpn.njucm.edu.cn/enlink/api/client/callback/cas" method=post>
+              <input name="username" />
+              <input name="password" type="password" />
+            </form>
+          </body>
+        </html>
+        '''
+        login_url = 'https://webvpn.njucm.edu.cn/login?service=https://webvpn.njucm.edu.cn/enlink/api/client/callback/cas'
+
+        rewritten = rewrite_login_page(page, login_url)
+
+        self.assertIn('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Fjs%2Fjquery-3.4.1.min.js', rewritten)
+        self.assertIn('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Fthemes%2Fsudy_default%2Flogin.css', rewritten)
+        self.assertIn('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Fimages%2Flogo.png', rewritten)
+        self.assertIn('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Ffavicon.ico', rewritten)
+        self.assertIn(
+            'name="__portal_action" value="https://webvpn.njucm.edu.cn/login?service=https://webvpn.njucm.edu.cn/enlink/api/client/callback/cas"',
+            rewritten,
+        )
+        self.assertNotIn('https%3A%2F%2Fwebvpn.njucm.edu.cn%2Fjs%2Fjquery-3.4.1.min.js', rewritten)
+
+    def test_client_allows_njucm_ids_assets_after_webvpn_cas_login_response(self):
+        page = '''
+        <html>
+          <head><script src=/js/jquery-3.4.1.min.js></script></head>
+          <body>
+            <form action="/login?service=https://webvpn.njucm.edu.cn/enlink/api/client/callback/cas" method=post>
+              <input name="username" />
+              <input name="password" type="password" />
+            </form>
+          </body>
+        </html>
+        '''
+        settings = test_settings()
+        settings = Settings(
+            host=settings.host,
+            port=settings.port,
+            timezone=settings.timezone,
+            data_dir=settings.data_dir,
+            database_path=settings.database_path,
+            campus_login_url='https://webvpn.njucm.edu.cn/http/webvpn-token/web/auths/index.aspx',
+            campus_electricity_url=settings.campus_electricity_url,
+            smtp_host=settings.smtp_host,
+            smtp_port=settings.smtp_port,
+            smtp_username=settings.smtp_username,
+            smtp_password=settings.smtp_password,
+            smtp_from=settings.smtp_from,
+        )
+        client = CampusPortalClient(settings)
+        client.opener = FakeResourceOpener(
+            page,
+            response_url='https://webvpn.njucm.edu.cn/login?service=https://webvpn.njucm.edu.cn/enlink/api/client/callback/cas',
+        )
+
+        rewritten = client.load_login_page()
+
+        self.assertIn('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Fjs%2Fjquery-3.4.1.min.js', rewritten)
+
+        client.opener = FakeResourceOpener('console.log("ok")', content_type='application/javascript')
+        body, content_type = client.fetch_proxy_resource(
+            '/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Fjs%2Fjquery-3.4.1.min.js',
+        )
+
+        self.assertEqual(body, b'console.log("ok")')
+        self.assertEqual(content_type, 'application/javascript')
+        self.assertEqual(getattr(client.opener.requests[0], 'full_url'), 'https://ids.njucm.edu.cn/js/jquery-3.4.1.min.js')
+        with self.assertRaises(Exception):
+            client.fetch_proxy_resource('/portal/proxy?url=https%3A%2F%2Fids.njucm.edu.cn%2Flogin')
+
     def test_rewrite_css_urls_routes_assets_through_local_proxy(self):
         rewritten = rewrite_css_urls('body{background:url(../images/bg.png)}', 'http://portal.test/css/login.css', 'http://portal.test/Default.aspx')
 

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from backend.app.persistence.repository import Repository
 from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.services.models import ElectricityReading, RoomSelection, ScheduleConfig
-from backend.app.shared.errors import EmailDeliveryError, SessionExpiredError
+from backend.app.shared.errors import AuthenticationError, EmailDeliveryError, SessionExpiredError
 
 
 class FakePortal:
@@ -137,6 +137,29 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
 
         self.assertEqual({row["name"] for row in table_rows}, {"rooms", "electricity_readings", "collection_runs"})
         self.assertIn("idx_electricity_readings_room_window", {row["name"] for row in reading_indexes})
+
+    def test_collection_writes_reading_and_success_run(self):
+        result = self.scheduler.run_once()
+
+        self.assertEqual(result["reading"]["numericValue"], 20.93)
+        self.assertEqual(len(self.repository.list_readings()), 1)
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "success")
+        self.assertTrue(runs[0]["readingInserted"])
+
+    def test_authentication_failure_records_failed_run(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "unauthenticated"
+
+        with self.assertRaises(AuthenticationError):
+            self.scheduler.run_once()
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "failed")
+        self.assertEqual(runs[0]["errorCode"], "AUTHENTICATION_ERROR")
 
     def test_same_room_and_collection_window_does_not_insert_duplicate_reading(self):
         with patch.object(
