@@ -918,6 +918,31 @@ class CampusPortalParserTests(unittest.TestCase):
 
         self.assertEqual(getattr(opener.requests[0], 'full_url'), 'https://ids.test/web/auths/app.js?v=1')
 
+    def test_keep_alive_uses_electricity_url_and_keeps_authenticated_session(self):
+        client = CampusPortalClient(test_settings())
+        client.authenticated = True
+        client.authentication_status = 'authenticated'
+        opener = FakeResourceOpener('<span>自助购电</span>')
+        client.opener = opener
+
+        client.keep_alive()
+
+        self.assertTrue(client.authenticated)
+        self.assertEqual(client.authentication_status, 'authenticated')
+        self.assertEqual(getattr(opener.requests[0], 'full_url'), 'http://portal.test/Web/Student/FeeElect.aspx')
+
+    def test_keep_alive_marks_login_page_as_session_expired(self):
+        client = CampusPortalClient(test_settings())
+        client.authenticated = True
+        client.authentication_status = 'authenticated'
+        client.opener = FakeResourceOpener('<input type="password" />')
+
+        with self.assertRaises(SessionExpiredError):
+            client.keep_alive()
+
+        self.assertFalse(client.authenticated)
+        self.assertEqual(client.authentication_status, 'session_expired')
+
     def test_fetch_reading_queries_fee_elect_page_with_current_session(self):
         fee_elect_page = '''
         <form action="FeeElect.aspx" method="post">

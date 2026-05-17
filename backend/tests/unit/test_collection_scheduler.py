@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app.persistence.repository import Repository
-from backend.app.scheduler.collection_scheduler import CollectionScheduler
+from backend.app.scheduler.collection_scheduler import CollectionScheduler, _keep_alive_delay_seconds
 from backend.app.services.models import ElectricityReading, RoomSelection, ScheduleConfig
 from backend.app.shared.errors import AuthenticationError, EmailDeliveryError, SessionExpiredError
 
@@ -22,6 +22,7 @@ class FakePortal:
             unit="元",
         )
         self.expire_next_fetch = False
+        self.keep_alive_calls = 0
 
     def fetch_reading(self, selection):
         if self.expire_next_fetch:
@@ -29,6 +30,9 @@ class FakePortal:
             self.authentication_status = "session_expired"
             raise SessionExpiredError("Campus portal session expired. Please log in again.")
         return self.reading
+
+    def keep_alive(self):
+        self.keep_alive_calls += 1
 
     def mark_logged_in(self):
         self.authenticated = True
@@ -59,9 +63,11 @@ class BrokenAlerts(FakeAlerts):
 class FakeTimer:
     created = []
 
-    def __init__(self, interval, callback):
+    def __init__(self, interval, callback, args=None, kwargs=None):
         self.interval = interval
         self.callback = callback
+        self.args = args or ()
+        self.kwargs = kwargs or {}
         self.daemon = False
         self.started = False
         FakeTimer.created.append(self)
@@ -97,8 +103,7 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         failures = self._failures()
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0]["error_code"], "SESSION_EXPIRED")
-        self.assertEqual(len(FakeTimer.created), 1)
-        self.assertEqual(FakeTimer.created[0].interval, 3600)
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [3600])
         self.assertTrue(FakeTimer.created[0].started)
 
     def test_relogin_after_expiry_allows_collection_without_rescheduling(self):
@@ -233,6 +238,38 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         runs = self.repository.list_collection_runs()
         self.assertEqual(runs[-1]["status"], "failed")
         self.assertEqual(runs[-1]["errorCode"], "UNEXPECTED_ERROR")
+
+    def test_keep_alive_delay_for_hour_interval_stays_before_collection(self):
+        self.assertEqual(_keep_alive_delay_seconds(3600), 900)
+        self.assertIsNone(_keep_alive_delay_seconds(960))
+
+    def test_restart_schedules_keep_alive_for_long_authenticated_interval(self):
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            self.scheduler.restart()
+
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [3600, 900])
+        self.assertEqual(FakeTimer.created[1].args, (2700,))
+        self.assertTrue(FakeTimer.created[0].started)
+        self.assertTrue(FakeTimer.created[1].started)
+
+    def test_restart_skips_keep_alive_for_short_interval(self):
+        self.repository.save_schedule_config(
+            ScheduleConfig(interval_seconds=900, start_time="00:00", end_time="23:59", enabled=True),
+            "2026-05-13T00:00:00Z",
+        )
+
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            self.scheduler.restart()
+
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [900])
+
+    def test_keep_alive_reschedules_until_guard_before_collection(self):
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            self.scheduler._run_keep_alive_and_reschedule(2700)
+
+        self.assertEqual(self.portal.keep_alive_calls, 1)
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [900])
+        self.assertEqual(FakeTimer.created[0].args, (1800,))
 
     def _failures(self):
         with self.repository.connect() as conn:

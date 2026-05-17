@@ -181,6 +181,20 @@ class CampusPortalClient:
         self.authenticated = True
         self.authentication_status = "authenticated"
 
+    def keep_alive(self) -> None:
+        if not self.authenticated:
+            return
+        try:
+            with self.opener.open(_get_request(self.settings.campus_electricity_url), timeout=15) as response:
+                body = response.read().decode(_response_charset(response), errors="ignore")
+        except OSError as exc:
+            raise PortalFetchError("Campus portal keep-alive failed.") from exc
+        diagnosis = diagnose_portal_response(body)
+        if diagnosis.kind == "login_page":
+            self.authenticated = False
+            self.authentication_status = "session_expired"
+            raise SessionExpiredError("Campus portal session expired. Please log in again.")
+
     def fetch_reading(self, selection: RoomSelection) -> ElectricityReading:
         if not self.authenticated:
             if self.authentication_status == "session_expired":
