@@ -44,6 +44,9 @@ class SettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.campus_login_url, DEFAULT_CAMPUS_WEBVPN_URL)
         self.assertEqual(settings.campus_electricity_url, DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL)
+        self.assertEqual(settings.session_keep_alive_interval_seconds, 300)
+        self.assertFalse(settings.persist_portal_cookies)
+        self.assertEqual(settings.portal_cookie_path, settings.data_dir / 'portal_cookies.txt')
 
     def test_load_settings_preserves_campus_url_overrides(self):
         with patch.dict(
@@ -51,6 +54,9 @@ class SettingsTests(unittest.TestCase):
             {
                 'CAMPUS_LOGIN_URL': 'http://example.test/login',
                 'CAMPUS_ELECTRICITY_URL': 'http://example.test/electricity',
+                'SESSION_KEEP_ALIVE_INTERVAL_SECONDS': '120',
+                'PERSIST_PORTAL_COOKIES': 'true',
+                'PORTAL_COOKIE_PATH': 'data/custom-cookies.txt',
             },
             clear=True,
         ):
@@ -58,3 +64,6 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.campus_login_url, 'http://example.test/login')
         self.assertEqual(settings.campus_electricity_url, 'http://example.test/electricity')
+        self.assertEqual(settings.session_keep_alive_interval_seconds, 120)
+        self.assertTrue(settings.persist_portal_cookies)
+        self.assertEqual(str(settings.portal_cookie_path), 'data/custom-cookies.txt')

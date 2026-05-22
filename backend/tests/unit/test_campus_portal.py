@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from http.cookiejar import CookieJar
 
@@ -16,6 +17,7 @@ from backend.app.integrations.campus_portal import (
 )
 from backend.app.config.settings import Settings
 from pathlib import Path
+from unittest.mock import patch
 from backend.app.shared.errors import PortalParseError, SessionExpiredError
 from backend.app.services.models import RoomSelection
 
@@ -90,21 +92,23 @@ class FakeLoginSequenceOpener:
         return FakePortalResponse(body, url=response_url)
 
 
-def test_settings():
-    return Settings(
-        host='127.0.0.1',
-        port=8000,
-        timezone='Asia/Shanghai',
-        data_dir=Path('data'),
-        database_path=Path('data/test.sqlite3'),
-        campus_login_url='http://portal.test/Default.aspx',
-        campus_electricity_url='http://portal.test/Web/Student/FeeElect.aspx',
-        smtp_host='',
-        smtp_port=587,
-        smtp_username='',
-        smtp_password='',
-        smtp_from='',
-    )
+def test_settings(**overrides):
+    values = {
+        'host': '127.0.0.1',
+        'port': 8000,
+        'timezone': 'Asia/Shanghai',
+        'data_dir': Path('data'),
+        'database_path': Path('data/test.sqlite3'),
+        'campus_login_url': 'http://portal.test/Default.aspx',
+        'campus_electricity_url': 'http://portal.test/Web/Student/FeeElect.aspx',
+        'smtp_host': '',
+        'smtp_port': 587,
+        'smtp_username': '',
+        'smtp_password': '',
+        'smtp_from': '',
+    }
+    values.update(overrides)
+    return Settings(**values)
 
 
 class CampusPortalParserTests(unittest.TestCase):
@@ -977,3 +981,97 @@ class CampusPortalParserTests(unittest.TestCase):
         self.assertIn('txtRoom=2324', post_data)
         self.assertIn('btnQuery=%E6%9F%A5%E8%AF%A2%E7%94%B5%E9%87%8F', post_data)
         self.assertNotIn('btkOK', post_data)
+
+    def test_reset_session_clears_cookie_state_and_persisted_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_path = Path(temp_dir) / 'portal_cookies.txt'
+            settings = test_settings(
+                data_dir=Path(temp_dir),
+                database_path=Path(temp_dir) / 'test.sqlite3',
+                persist_portal_cookies=True,
+                portal_cookie_path=cookie_path,
+            )
+            client = CampusPortalClient(settings)
+            client.import_cookies('ASP.NET_SessionId=abc')
+            self.assertTrue(cookie_path.exists())
+            client.authenticated = True
+            client.authentication_status = 'authenticated'
+            client._login_page_url = 'http://portal.test/Other.aspx'
+
+            client.reset_session()
+
+            self.assertFalse(client.authenticated)
+            self.assertEqual(client.authentication_status, 'unauthenticated')
+            self.assertEqual(client._login_page_url, settings.campus_login_url)
+            self.assertFalse(cookie_path.exists())
+            self.assertEqual(list(client.cookie_jar), [])
+
+    def test_cookie_persistence_round_trips_when_enabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_path = Path(temp_dir) / 'portal_cookies.txt'
+            settings = test_settings(
+                data_dir=Path(temp_dir),
+                database_path=Path(temp_dir) / 'test.sqlite3',
+                persist_portal_cookies=True,
+                portal_cookie_path=cookie_path,
+            )
+            client = CampusPortalClient(settings)
+            client.import_cookies('ASP.NET_SessionId=abc; token=xyz')
+
+            reloaded = CampusPortalClient(settings)
+
+            self.assertTrue(reloaded.load_persisted_cookies())
+            self.assertEqual({cookie.name: cookie.value for cookie in reloaded.cookie_jar}, {'ASP.NET_SessionId': 'abc', 'token': 'xyz'})
+            self.assertEqual(oct(cookie_path.stat().st_mode & 0o777), '0o600')
+
+    def test_verify_persisted_session_validates_with_keep_alive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_path = Path(temp_dir) / 'portal_cookies.txt'
+            settings = test_settings(
+                data_dir=Path(temp_dir),
+                database_path=Path(temp_dir) / 'test.sqlite3',
+                persist_portal_cookies=True,
+                portal_cookie_path=cookie_path,
+            )
+            seeded = CampusPortalClient(settings)
+            seeded.import_cookies('ASP.NET_SessionId=abc')
+            with patch('backend.app.integrations.campus_portal.build_opener', return_value=FakeResourceOpener('<span>自助购电</span>')):
+                client = CampusPortalClient(settings)
+                self.assertTrue(client.verify_persisted_session())
+            self.assertTrue(client.authenticated)
+            self.assertEqual(client.authentication_status, 'authenticated')
+
+
+    def test_cookie_persistence_default_disabled_does_not_write_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_path = Path(temp_dir) / 'portal_cookies.txt'
+            settings = test_settings(
+                data_dir=Path(temp_dir),
+                database_path=Path(temp_dir) / 'test.sqlite3',
+                persist_portal_cookies=False,
+                portal_cookie_path=cookie_path,
+            )
+            client = CampusPortalClient(settings)
+
+            client.import_cookies('ASP.NET_SessionId=abc')
+
+            self.assertFalse(cookie_path.exists())
+
+    def test_verify_persisted_session_clears_expired_cookie_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_path = Path(temp_dir) / 'portal_cookies.txt'
+            settings = test_settings(
+                data_dir=Path(temp_dir),
+                database_path=Path(temp_dir) / 'test.sqlite3',
+                persist_portal_cookies=True,
+                portal_cookie_path=cookie_path,
+            )
+            seeded = CampusPortalClient(settings)
+            seeded.import_cookies('ASP.NET_SessionId=abc')
+            with patch('backend.app.integrations.campus_portal.build_opener', return_value=FakeResourceOpener('<input type="password" />')):
+                client = CampusPortalClient(settings)
+                self.assertFalse(client.verify_persisted_session())
+
+            self.assertFalse(client.authenticated)
+            self.assertEqual(client.authentication_status, 'session_expired')
+            self.assertFalse(cookie_path.exists())

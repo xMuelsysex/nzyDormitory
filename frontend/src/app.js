@@ -34,12 +34,15 @@ const ctx = canvas.getContext('2d');
 const roomForm = document.querySelector('#roomForm');
 const scheduleForm = document.querySelector('#scheduleForm');
 const alertForm = document.querySelector('#alertForm');
+const loginLink = document.querySelector('#loginLink');
 const runOnceButton = document.querySelector('#runOnceButton');
 const refreshButton = document.querySelector('#refreshButton');
 const previousPageButton = document.querySelector('#previousPageButton');
 const nextPageButton = document.querySelector('#nextPageButton');
 const pageInfo = document.querySelector('#pageInfo');
 const pageSizeSelect = document.querySelector('#pageSizeSelect');
+
+const STATUS_REFRESH_INTERVAL_MS = 60_000;
 
 const readingsState = {
   page: 1,
@@ -64,14 +67,27 @@ function setMessage(id, message, isError = false) {
   el.classList.toggle('error', isError);
 }
 
-async function refreshStatus() {
+async function refreshStatus(options = {}) {
+  const { applyConfig = true } = options;
   const status = await api.get('/api/status');
   const parts = [authenticationStatusLabel(status)];
   if (status.roomSelection) parts.push(`${status.roomSelection.building} ${status.roomSelection.room}`);
   statusBadge.textContent = parts.join(' · ');
-  applySavedConfig(status);
+  if (applyConfig) applySavedConfig(status);
+  updateLoginLink(status);
   updateControlStates(status);
   renderCollectionMessage(status);
+}
+
+function updateLoginLink(status) {
+  if (!loginLink) return;
+  if (status.authenticationStatus === 'session_expired') {
+    loginLink.href = '/portal/login?reset=1';
+    loginLink.textContent = '重新登录校园门户';
+    return;
+  }
+  loginLink.href = '/portal/login';
+  loginLink.textContent = status.authenticated ? '重新进入校园门户登录' : '进入校园门户登录';
 }
 
 function authenticationStatusLabel(status) {
@@ -441,3 +457,6 @@ nextPageButton.addEventListener('click', () => {
 
 refreshStatus().catch(() => { statusBadge.textContent = '状态加载失败'; });
 refreshReadings();
+setInterval(() => {
+  refreshStatus({ applyConfig: false }).catch(() => {});
+}, STATUS_REFRESH_INTERVAL_MS);

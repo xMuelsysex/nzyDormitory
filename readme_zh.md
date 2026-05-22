@@ -25,6 +25,9 @@ APP_TIMEZONE=Asia/Shanghai
 DATA_DIR=./data
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
+PERSIST_PORTAL_COOKIES=false
+PORTAL_COOKIE_PATH=./data/portal_cookies.txt
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USERNAME=
@@ -33,6 +36,8 @@ SMTP_FROM=
 ```
 
 只有启用邮件提醒时才需要配置 SMTP 设置。
+
+`SESSION_KEEP_ALIVE_INTERVAL_SECONDS` 控制独立校园门户保活间隔，默认 300 秒。`PERSIST_PORTAL_COOKIES` 默认关闭；设置为 `true` 时，应用会把校园门户会话 Cookie 保存到 `PORTAL_COOKIE_PATH`，并尽量设置 `0600` 文件权限，便于可信单用户部署在服务重启后继续使用原会话。Cookie 文件等同登录凭证，只应在可信主机上开启。
 
 `CAMPUS_LOGIN_URL` 和 `CAMPUS_ELECTRICITY_URL` 默认使用上面的 NJUCM WebVPN 门户路径。仅在校园门户路径变化，或部署环境需要使用其他可访问的校园网关时覆盖它们。
 
@@ -91,6 +96,11 @@ cd nzyDormitory
 cat > .env <<'EOF'
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+
+# 可选会话连续性设置
+SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
+PERSIST_PORTAL_COOKIES=false
+PORTAL_COOKIE_PATH=/app/data/portal_cookies.txt
 
 # 可选邮件提醒设置
 SMTP_HOST=

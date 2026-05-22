@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app.persistence.repository import Repository
-from backend.app.scheduler.collection_scheduler import CollectionScheduler, _keep_alive_delay_seconds
+from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.services.models import ElectricityReading, RoomSelection, ScheduleConfig
 from backend.app.shared.errors import AuthenticationError, EmailDeliveryError, SessionExpiredError
 
@@ -48,10 +48,15 @@ class BrokenPortal(FakePortal):
 class FakeAlerts:
     def __init__(self):
         self.evaluations = 0
+        self.session_expired_notifications = []
 
     def evaluate(self, reading):
         self.evaluations += 1
         return False
+
+    def notify_session_expired(self, occurred_at):
+        self.session_expired_notifications.append(occurred_at)
+        return True
 
 
 class BrokenAlerts(FakeAlerts):
@@ -239,37 +244,21 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         self.assertEqual(runs[-1]["status"], "failed")
         self.assertEqual(runs[-1]["errorCode"], "UNEXPECTED_ERROR")
 
-    def test_keep_alive_delay_for_hour_interval_stays_before_collection(self):
-        self.assertEqual(_keep_alive_delay_seconds(3600), 900)
-        self.assertIsNone(_keep_alive_delay_seconds(960))
-
-    def test_restart_schedules_keep_alive_for_long_authenticated_interval(self):
+    def test_restart_only_schedules_collection_timer(self):
         with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
             self.scheduler.restart()
 
-        self.assertEqual([timer.interval for timer in FakeTimer.created], [3600, 900])
-        self.assertEqual(FakeTimer.created[1].args, (2700,))
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [3600])
         self.assertTrue(FakeTimer.created[0].started)
-        self.assertTrue(FakeTimer.created[1].started)
 
-    def test_restart_skips_keep_alive_for_short_interval(self):
-        self.repository.save_schedule_config(
-            ScheduleConfig(interval_seconds=900, start_time="00:00", end_time="23:59", enabled=True),
-            "2026-05-13T00:00:00Z",
-        )
+    def test_session_expiry_notifies_alert_service(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
 
-        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
-            self.scheduler.restart()
+        with self.assertRaises(SessionExpiredError):
+            self.scheduler.run_once()
 
-        self.assertEqual([timer.interval for timer in FakeTimer.created], [900])
-
-    def test_keep_alive_reschedules_until_guard_before_collection(self):
-        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
-            self.scheduler._run_keep_alive_and_reschedule(2700)
-
-        self.assertEqual(self.portal.keep_alive_calls, 1)
-        self.assertEqual([timer.interval for timer in FakeTimer.created], [900])
-        self.assertEqual(FakeTimer.created[0].args, (1800,))
+        self.assertEqual(len(self.alerts.session_expired_notifications), 1)
 
     def _failures(self):
         with self.repository.connect() as conn:

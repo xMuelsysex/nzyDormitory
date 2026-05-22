@@ -5,15 +5,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import logging
 import mimetypes
+import threading
 
 from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.config.settings import load_settings
 from backend.app.integrations.campus_portal import CampusPortalClient
 from backend.app.persistence.repository import Repository
 from backend.app.scheduler.collection_scheduler import CollectionScheduler
+from backend.app.scheduler.session_keeper import SessionKeeper
 from backend.app.services.monitor_service import MonitorService
 from backend.app.shared.errors import ValidationError
-from backend.app.shared.http import read_form_body, read_json_body, send_bytes, send_error, send_html, send_json, send_redirect
+from backend.app.shared.http import read_form_body, read_json_body, send_bytes, send_error, send_html, send_json, send_redirect, utc_now_iso
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ repository = Repository(settings.database_path)
 portal = CampusPortalClient(settings)
 alert_service = EmailAlertService(settings, repository)
 scheduler = CollectionScheduler(repository, portal, alert_service, settings.zoneinfo)
+session_keeper = SessionKeeper(portal, repository, alert_service, settings.session_keep_alive_interval_seconds)
 service = MonitorService(repository, portal, scheduler)
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "src"
 READINGS_PAGE_SIZES = {10, 20}
@@ -39,6 +42,10 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
                 page, page_size = parse_readings_pagination(parsed_url.query)
                 send_json(self, 200, service.readings(page, page_size))
             elif path == "/portal/login":
+                params = parse_qs(parsed_url.query, keep_blank_values=True)
+                if params.get("reset", [""])[-1] == "1":
+                    session_keeper.stop()
+                    portal.reset_session()
                 send_html(self, 200, portal.load_login_page())
             elif path == "/portal/proxy":
                 body, content_type = portal.fetch_proxy_resource(self.path)
@@ -57,6 +64,7 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
             if path == "/portal/login":
                 success, html_body = portal.submit_login_page(read_form_body(self))
                 if success:
+                    handle_login_success(recover_if_room_selected=True)
                     send_redirect(self, "/?login=success")
                 else:
                     send_html(self, 200, html_body)
@@ -116,14 +124,53 @@ def _positive_query_int(params: dict[str, list[str]], name: str, default: int) -
     return parsed
 
 
+def handle_login_success(*, recover_if_room_selected: bool) -> None:
+    session_keeper.restart()
+    scheduler.restart()
+    if recover_if_room_selected and repository.get_room_selection() is not None:
+        start_background_collection()
+
+
+def handle_session_restored_from_cookie(*, recover_if_schedule_enabled: bool) -> None:
+    session_keeper.restart()
+    if recover_if_schedule_enabled and _schedule_enabled() and repository.get_room_selection() is not None:
+        start_background_collection()
+
+
+def start_background_collection() -> None:
+    thread = threading.Thread(target=_run_background_collection, daemon=True)
+    thread.start()
+
+
+def _run_background_collection() -> None:
+    try:
+        scheduler.run_once()
+    except Exception:
+        logger.exception("background_recovery_collection_failed")
+
+
+def initialize_portal_session() -> None:
+    if settings.persist_portal_cookies and portal.verify_persisted_session():
+        handle_session_restored_from_cookie(recover_if_schedule_enabled=True)
+    elif settings.persist_portal_cookies and portal.authentication_status == "session_expired":
+        alert_service.notify_session_expired(utc_now_iso())
+
+
+def _schedule_enabled() -> bool:
+    config = repository.get_schedule_config()
+    return bool(config and config.enabled)
+
+
 def main() -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    initialize_portal_session()
     scheduler.restart()
     server = ThreadingHTTPServer((settings.host, settings.port), DormElectricityHandler)
     logger.info("server_started", extra={"host": settings.host, "port": settings.port})
     try:
         server.serve_forever()
     finally:
+        session_keeper.stop()
         scheduler.stop()
         server.server_close()
 

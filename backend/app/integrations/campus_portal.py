@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import html
 import mimetypes
+import os
 import re
+import threading
 from dataclasses import dataclass
-from http.cookiejar import Cookie, CookieJar
+from http.cookiejar import Cookie, CookieJar, LoadError, MozillaCookieJar
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
@@ -41,40 +43,52 @@ class FeeElectRoomFields:
 class CampusPortalClient:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.cookie_jar = CookieJar()
+        self._lock = threading.RLock()
+        self.cookie_jar = self._new_cookie_jar()
         self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
         self.authenticated = False
         self.authentication_status = "unauthenticated"
         self._login_page_url = settings.campus_login_url
 
+    def _new_cookie_jar(self) -> CookieJar:
+        if self.settings.persist_portal_cookies:
+            return MozillaCookieJar(str(self.settings.portal_cookie_path))
+        return CookieJar()
+
+    def _rebuild_opener_locked(self) -> None:
+        self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
+
     def load_login_page(self) -> str:
-        try:
-            with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-                self._login_page_url = getattr(response, "url", self.settings.campus_login_url)
-        except OSError as exc:
-            raise PortalFetchError("Campus login portal is unavailable.") from exc
-        frame_login = self._fetch_frame_login_page(body, self._login_page_url)
-        if frame_login is not None:
-            body, self._login_page_url = frame_login
-        return rewrite_login_page(body, self._login_page_url)
+        with self._lock:
+            try:
+                with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+                    self._login_page_url = getattr(response, "url", self.settings.campus_login_url)
+            except OSError as exc:
+                raise PortalFetchError("Campus login portal is unavailable.") from exc
+            frame_login = self._fetch_frame_login_page(body, self._login_page_url)
+            if frame_login is not None:
+                body, self._login_page_url = frame_login
+            return rewrite_login_page(body, self._login_page_url)
 
     def fetch_proxy_resource(self, request_path: str) -> tuple[bytes, str]:
-        return self._fetch_and_rewrite_resource(
-            proxy_target_from_path(request_path, self.settings.campus_login_url, self._login_page_url),
-        )
+        with self._lock:
+            return self._fetch_and_rewrite_resource(
+                proxy_target_from_path(request_path, self.settings.campus_login_url, self._login_page_url),
+            )
 
     def fetch_portal_path(self, portal_path: str) -> tuple[bytes, str]:
-        parsed_path = urlparse(portal_path)
-        relative_path = parsed_path.path.removeprefix("/portal/")
-        base_url = self._login_page_url or self.settings.campus_login_url
-        target = _absolute_portal_url(f"/{relative_path}", base_url)
-        if parsed_path.query:
-            separator = "&" if urlparse(target).query else "?"
-            target = f"{target}{separator}{parsed_path.query}"
-        if not _is_allowed_portal_url(target, self.settings.campus_login_url, (base_url,)):
-            raise PortalFetchError("Portal proxy target is not allowed.")
-        return self._fetch_and_rewrite_resource(target)
+        with self._lock:
+            parsed_path = urlparse(portal_path)
+            relative_path = parsed_path.path.removeprefix("/portal/")
+            base_url = self._login_page_url or self.settings.campus_login_url
+            target = _absolute_portal_url(f"/{relative_path}", base_url)
+            if parsed_path.query:
+                separator = "&" if urlparse(target).query else "?"
+                target = f"{target}{separator}{parsed_path.query}"
+            if not _is_allowed_portal_url(target, self.settings.campus_login_url, (base_url,)):
+                raise PortalFetchError("Portal proxy target is not allowed.")
+            return self._fetch_and_rewrite_resource(target)
 
     def _fetch_and_rewrite_resource(self, target: str) -> tuple[bytes, str]:
         try:
@@ -95,37 +109,39 @@ class CampusPortalClient:
         return body, content_type
 
     def submit_login_page(self, fields: dict[str, str]) -> tuple[bool, str]:
-        action = fields.pop("__portal_action", self._login_page_url)
-        target = urljoin(self._login_page_url, action)
-        if not _is_allowed_portal_url(target, self.settings.campus_login_url, (self._login_page_url,)):
-            raise PortalFetchError("Portal login target is not allowed.")
-        request = Request(
-            target,
-            data=urlencode(fields).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": self._login_page_url,
-                "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
-            },
-        )
-        try:
-            with self.opener.open(request, timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-                response_url = getattr(response, "url", self._login_page_url)
-        except OSError as exc:
-            raise PortalFetchError("Campus login portal is unavailable.") from exc
-        frame_login = self._fetch_frame_login_page(body, response_url)
-        if frame_login is not None:
-            body, response_url = frame_login
-        if _looks_like_login_failure(body) or _looks_like_login_page(body) or not _looks_like_authenticated_page(body):
-            self.authenticated = False
-            self.authentication_status = "unauthenticated"
-            self._login_page_url = response_url
-            return False, rewrite_login_page(body, response_url)
-        self.authenticated = True
-        self.authentication_status = "authenticated"
-        return True, ""
+        with self._lock:
+            action = fields.pop("__portal_action", self._login_page_url)
+            target = urljoin(self._login_page_url, action)
+            if not _is_allowed_portal_url(target, self.settings.campus_login_url, (self._login_page_url,)):
+                raise PortalFetchError("Portal login target is not allowed.")
+            request = Request(
+                target,
+                data=urlencode(fields).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": self._login_page_url,
+                    "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
+                },
+            )
+            try:
+                with self.opener.open(request, timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+                    response_url = getattr(response, "url", self._login_page_url)
+            except OSError as exc:
+                raise PortalFetchError("Campus login portal is unavailable.") from exc
+            frame_login = self._fetch_frame_login_page(body, response_url)
+            if frame_login is not None:
+                body, response_url = frame_login
+            if _looks_like_login_failure(body) or _looks_like_login_page(body) or not _looks_like_authenticated_page(body):
+                self.authenticated = False
+                self.authentication_status = "unauthenticated"
+                self._login_page_url = response_url
+                return False, rewrite_login_page(body, response_url)
+            self.authenticated = True
+            self.authentication_status = "authenticated"
+            self.save_cookies()
+            return True, ""
 
     def _fetch_frame_login_page(self, body: str, response_url: str) -> tuple[str, str] | None:
         if not _looks_like_frame_page(body):
@@ -147,103 +163,176 @@ class CampusPortalClient:
         return None
 
     def login(self, username: str, password: str) -> None:
-        if not username or not password:
-            raise AuthenticationError("Username and password are required.")
-        try:
-            with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
-                login_page = response.read().decode(_response_charset(response), errors="ignore")
-                login_page_url = getattr(response, "url", self.settings.campus_login_url)
-            submission = build_login_submission(login_page_url, login_page, username, password)
-            data = urlencode(submission.fields).encode("utf-8")
+        with self._lock:
+            if not username or not password:
+                raise AuthenticationError("Username and password are required.")
+            try:
+                with self.opener.open(_get_request(self.settings.campus_login_url), timeout=15) as response:
+                    login_page = response.read().decode(_response_charset(response), errors="ignore")
+                    login_page_url = getattr(response, "url", self.settings.campus_login_url)
+                submission = build_login_submission(login_page_url, login_page, username, password)
+                data = urlencode(submission.fields).encode("utf-8")
+                request = Request(
+                    submission.url,
+                    data=data,
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Referer": login_page_url,
+                        "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
+                    },
+                )
+                with self.opener.open(request, timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+            except OSError as exc:
+                raise PortalFetchError("Campus login portal is unavailable.") from exc
+            if _looks_like_login_failure(body):
+                raise AuthenticationError("Campus login failed. Please verify credentials or import a browser session cookie.")
+            self.authenticated = True
+            self.authentication_status = "authenticated"
+            self.save_cookies()
+
+    def import_cookies(self, cookie_header: str) -> None:
+        with self._lock:
+            imported = import_cookie_header(self.cookie_jar, cookie_header, self.settings.campus_login_url)
+            if imported == 0:
+                raise AuthenticationError("No valid cookies were found in the provided cookie header.")
+            self.authenticated = True
+            self.authentication_status = "authenticated"
+            self.save_cookies()
+
+    def keep_alive(self) -> None:
+        with self._lock:
+            if not self.authenticated:
+                return
+            try:
+                with self.opener.open(_get_request(self.settings.campus_electricity_url), timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+            except OSError as exc:
+                raise PortalFetchError("Campus portal keep-alive failed.") from exc
+            diagnosis = diagnose_portal_response(body)
+            if diagnosis.kind == "login_page":
+                self.authenticated = False
+                self.authentication_status = "session_expired"
+                raise SessionExpiredError("Campus portal session expired. Please log in again.")
+            self.authenticated = True
+            self.authentication_status = "authenticated"
+            self.save_cookies()
+
+    def verify_persisted_session(self) -> bool:
+        with self._lock:
+            if not self.load_persisted_cookies():
+                return False
+            self.authenticated = True
+            self.authentication_status = "authenticated"
+            try:
+                self.keep_alive()
+            except SessionExpiredError:
+                self.clear_persisted_cookies()
+                return False
+            except PortalFetchError:
+                self.authenticated = False
+                self.authentication_status = "unauthenticated"
+                return False
+            return True
+
+    def reset_session(self) -> None:
+        with self._lock:
+            self.cookie_jar = self._new_cookie_jar()
+            self._rebuild_opener_locked()
+            self.authenticated = False
+            self.authentication_status = "unauthenticated"
+            self._login_page_url = self.settings.campus_login_url
+            self.clear_persisted_cookies()
+
+    def save_cookies(self) -> None:
+        with self._lock:
+            if not self.settings.persist_portal_cookies or not isinstance(self.cookie_jar, MozillaCookieJar):
+                return
+            self.settings.portal_cookie_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
+            try:
+                os.chmod(self.settings.portal_cookie_path, 0o600)
+            except OSError:
+                pass
+
+    def load_persisted_cookies(self) -> bool:
+        with self._lock:
+            if not self.settings.persist_portal_cookies or not isinstance(self.cookie_jar, MozillaCookieJar):
+                return False
+            if not self.settings.portal_cookie_path.exists():
+                return False
+            try:
+                self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
+            except (OSError, LoadError):
+                self.authenticated = False
+                self.authentication_status = "unauthenticated"
+                return False
+            self._rebuild_opener_locked()
+            return any(True for _ in self.cookie_jar)
+
+    def clear_persisted_cookies(self) -> None:
+        with self._lock:
+            if not self.settings.persist_portal_cookies:
+                return
+            try:
+                self.settings.portal_cookie_path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    def fetch_reading(self, selection: RoomSelection) -> ElectricityReading:
+        with self._lock:
+            if not self.authenticated:
+                if self.authentication_status == "session_expired":
+                    raise SessionExpiredError("Campus portal session expired. Please log in again.")
+                raise AuthenticationError("Campus portal login is required before collection.")
+            try:
+                electricity_url = self.settings.campus_electricity_url
+                with self.opener.open(_get_request(electricity_url), timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+            except OSError as exc:
+                raise PortalFetchError("Electricity portal is unavailable.") from exc
+            diagnosis = diagnose_portal_response(body)
+            if diagnosis.kind == "login_page":
+                self.authenticated = False
+                self.authentication_status = "session_expired"
+                raise SessionExpiredError("Campus portal session expired. Please log in again.")
+            if diagnosis.kind != "electricity_page":
+                raise PortalParseError(diagnosis.message)
+            fields = build_fee_elect_query_fields(body, selection)
             request = Request(
-                submission.url,
-                data=data,
+                electricity_url,
+                data=urlencode(fields).encode("utf-8"),
                 method="POST",
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": login_page_url,
+                    "Referer": electricity_url,
                     "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
                 },
             )
-            with self.opener.open(request, timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-        except OSError as exc:
-            raise PortalFetchError("Campus login portal is unavailable.") from exc
-        if _looks_like_login_failure(body):
-            raise AuthenticationError("Campus login failed. Please verify credentials or import a browser session cookie.")
-        self.authenticated = True
-        self.authentication_status = "authenticated"
-
-    def import_cookies(self, cookie_header: str) -> None:
-        imported = import_cookie_header(self.cookie_jar, cookie_header, self.settings.campus_login_url)
-        if imported == 0:
-            raise AuthenticationError("No valid cookies were found in the provided cookie header.")
-        self.authenticated = True
-        self.authentication_status = "authenticated"
-
-    def keep_alive(self) -> None:
-        if not self.authenticated:
-            return
-        try:
-            with self.opener.open(_get_request(self.settings.campus_electricity_url), timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-        except OSError as exc:
-            raise PortalFetchError("Campus portal keep-alive failed.") from exc
-        diagnosis = diagnose_portal_response(body)
-        if diagnosis.kind == "login_page":
-            self.authenticated = False
-            self.authentication_status = "session_expired"
-            raise SessionExpiredError("Campus portal session expired. Please log in again.")
-
-    def fetch_reading(self, selection: RoomSelection) -> ElectricityReading:
-        if not self.authenticated:
-            if self.authentication_status == "session_expired":
+            try:
+                with self.opener.open(request, timeout=15) as response:
+                    body = response.read().decode(_response_charset(response), errors="ignore")
+            except OSError as exc:
+                raise PortalFetchError("Electricity portal is unavailable.") from exc
+            diagnosis = diagnose_portal_response(body)
+            if diagnosis.kind == "login_page":
+                self.authenticated = False
+                self.authentication_status = "session_expired"
                 raise SessionExpiredError("Campus portal session expired. Please log in again.")
-            raise AuthenticationError("Campus portal login is required before collection.")
-        try:
-            electricity_url = self.settings.campus_electricity_url
-            with self.opener.open(_get_request(electricity_url), timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-        except OSError as exc:
-            raise PortalFetchError("Electricity portal is unavailable.") from exc
-        diagnosis = diagnose_portal_response(body)
-        if diagnosis.kind == "login_page":
-            self.authenticated = False
-            self.authentication_status = "session_expired"
-            raise SessionExpiredError("Campus portal session expired. Please log in again.")
-        if diagnosis.kind != "electricity_page":
-            raise PortalParseError(diagnosis.message)
-        fields = build_fee_elect_query_fields(body, selection)
-        request = Request(
-            electricity_url,
-            data=urlencode(fields).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": electricity_url,
-                "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
-            },
-        )
-        try:
-            with self.opener.open(request, timeout=15) as response:
-                body = response.read().decode(_response_charset(response), errors="ignore")
-        except OSError as exc:
-            raise PortalFetchError("Electricity portal is unavailable.") from exc
-        diagnosis = diagnose_portal_response(body)
-        if diagnosis.kind == "login_page":
-            self.authenticated = False
-            self.authentication_status = "session_expired"
-            raise SessionExpiredError("Campus portal session expired. Please log in again.")
-        if diagnosis.kind != "electricity_page":
-            raise PortalParseError(diagnosis.message)
-        value, unit = parse_electricity_value(body)
-        return ElectricityReading(
-            collected_at=utc_now_iso(),
-            building=selection.building,
-            room=selection.room,
-            numeric_value=value,
-            unit=unit,
-        )
+            if diagnosis.kind != "electricity_page":
+                raise PortalParseError(diagnosis.message)
+            value, unit = parse_electricity_value(body)
+            self.save_cookies()
+            return ElectricityReading(
+                collected_at=utc_now_iso(),
+                building=selection.building,
+                room=selection.room,
+                numeric_value=value,
+                unit=unit,
+            )
 
 
 def rewrite_login_page(page_html: str, login_url: str) -> str:

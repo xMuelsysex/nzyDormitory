@@ -28,6 +28,9 @@ class Settings:
     smtp_username: str
     smtp_password: str
     smtp_from: str
+    session_keep_alive_interval_seconds: int = 300
+    persist_portal_cookies: bool = False
+    portal_cookie_path: Path = Path("data/portal_cookies.txt")
 
     @property
     def zoneinfo(self) -> tzinfo:
@@ -54,4 +57,14 @@ def load_settings() -> Settings:
         smtp_username=os.getenv("SMTP_USERNAME", ""),
         smtp_password=os.getenv("SMTP_PASSWORD", ""),
         smtp_from=os.getenv("SMTP_FROM", os.getenv("SMTP_USERNAME", "")),
+        session_keep_alive_interval_seconds=int(os.getenv("SESSION_KEEP_ALIVE_INTERVAL_SECONDS", "300")),
+        persist_portal_cookies=_env_bool("PERSIST_PORTAL_COOKIES", False),
+        portal_cookie_path=Path(os.getenv("PORTAL_COOKIE_PATH", str(data_dir / "portal_cookies.txt"))),
     )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}

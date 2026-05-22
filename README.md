@@ -25,6 +25,9 @@ APP_TIMEZONE=Asia/Shanghai
 DATA_DIR=./data
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
+PERSIST_PORTAL_COOKIES=false
+PORTAL_COOKIE_PATH=./data/portal_cookies.txt
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USERNAME=
@@ -33,6 +36,8 @@ SMTP_FROM=
 ```
 
 SMTP settings are required only when email alerts are enabled.
+
+`SESSION_KEEP_ALIVE_INTERVAL_SECONDS` controls the independent campus portal keep-alive interval and defaults to 300 seconds. `PERSIST_PORTAL_COOKIES` is disabled by default; if set to `true`, the app stores the campus portal session cookie file at `PORTAL_COOKIE_PATH` with best-effort `0600` permissions so a trusted single-user deployment can survive restarts. The cookie file is a login credential, so enable this only on trusted hosts.
 
 `CAMPUS_LOGIN_URL` and `CAMPUS_ELECTRICITY_URL` default to the NJUCM WebVPN portal paths above. Override them only when the campus portal path changes or when deploying in an environment with a different reachable campus gateway.
 
@@ -91,6 +96,11 @@ Create `.env` only for values that differ from the defaults or for SMTP alert se
 cat > .env <<'EOF'
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+
+# Optional session continuity settings
+SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
+PERSIST_PORTAL_COOKIES=false
+PORTAL_COOKIE_PATH=/app/data/portal_cookies.txt
 
 # Optional email alert settings
 SMTP_HOST=

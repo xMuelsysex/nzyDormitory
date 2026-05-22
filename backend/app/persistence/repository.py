@@ -89,7 +89,8 @@ class Repository:
                 );
                 CREATE TABLE IF NOT EXISTS alert_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
-                    last_alert_sent_at TEXT
+                    last_alert_sent_at TEXT,
+                    last_session_expired_alert_sent_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS collection_failures (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -237,7 +238,28 @@ class Repository:
 
     def mark_alert_sent(self, sent_at: str) -> None:
         with self.connect() as conn:
-            conn.execute("REPLACE INTO alert_state (id, last_alert_sent_at) VALUES (1, ?)", (sent_at,))
+            conn.execute(
+                """
+                INSERT INTO alert_state (id, last_alert_sent_at) VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET last_alert_sent_at = excluded.last_alert_sent_at
+                """,
+                (sent_at,),
+            )
+
+    def get_last_session_expired_alert_sent_at(self) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT last_session_expired_alert_sent_at FROM alert_state WHERE id = 1").fetchone()
+        return None if row is None else row["last_session_expired_alert_sent_at"]
+
+    def mark_session_expired_alert_sent(self, sent_at: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO alert_state (id, last_session_expired_alert_sent_at) VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET last_session_expired_alert_sent_at = excluded.last_session_expired_alert_sent_at
+                """,
+                (sent_at,),
+            )
 
     def start_collection_run(self, selection: RoomSelection, started_at: str, collection_window_start: str) -> int:
         with self.connect() as conn:
@@ -328,6 +350,9 @@ class Repository:
             conn.execute("ALTER TABLE electricity_readings ADD COLUMN collection_run_id INTEGER REFERENCES collection_runs(id)")
         if "collection_window_start" not in reading_columns:
             conn.execute("ALTER TABLE electricity_readings ADD COLUMN collection_window_start TEXT")
+        alert_state_columns = self._table_columns(conn, "alert_state")
+        if "last_session_expired_alert_sent_at" not in alert_state_columns:
+            conn.execute("ALTER TABLE alert_state ADD COLUMN last_session_expired_alert_sent_at TEXT")
         self._backfill_current_room(conn)
         conn.executescript(
             """

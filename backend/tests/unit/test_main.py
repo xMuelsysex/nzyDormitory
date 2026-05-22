@@ -1,7 +1,7 @@
 import errno
 import unittest
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from backend.app.main import DormElectricityHandler, FRONTEND_DIR, parse_readings_pagination
 from backend.app.shared.errors import ValidationError
@@ -50,6 +50,93 @@ class StaticFileTests(unittest.TestCase):
             handler.do_POST()
 
         send_json.assert_called_once_with(handler, 404, {'error': {'code': 'NOT_FOUND', 'message': 'Endpoint not found'}})
+
+
+class PortalLoginFlowTests(unittest.TestCase):
+    def test_reset_login_clears_session_before_loading_page(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/portal/login?reset=1'
+        portal = Mock()
+        portal.load_login_page.return_value = '<form></form>'
+        session_keeper = Mock()
+
+        with (
+            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.session_keeper', session_keeper),
+            patch('backend.app.main.send_html') as send_html,
+        ):
+            handler.do_GET()
+
+        session_keeper.stop.assert_called_once_with()
+        portal.reset_session.assert_called_once_with()
+        portal.load_login_page.assert_called_once_with()
+        send_html.assert_called_once_with(handler, 200, '<form></form>')
+
+    def test_plain_login_does_not_reset_existing_session(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/portal/login'
+        portal = Mock()
+        portal.load_login_page.return_value = '<form></form>'
+
+        with (
+            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.send_html'),
+        ):
+            handler.do_GET()
+
+        portal.reset_session.assert_not_called()
+        portal.load_login_page.assert_called_once_with()
+
+    def test_successful_login_starts_recovery_before_redirect(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/portal/login'
+        portal = Mock()
+        portal.submit_login_page.return_value = (True, '')
+
+        with (
+            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.read_form_body', return_value={'UserName': 'student'}),
+            patch('backend.app.main.handle_login_success') as handle_login_success,
+            patch('backend.app.main.send_redirect') as send_redirect,
+        ):
+            handler.do_POST()
+
+        handle_login_success.assert_called_once_with(recover_if_room_selected=True)
+        send_redirect.assert_called_once_with(handler, '/?login=success')
+
+    def test_cookie_restored_session_starts_keeper_and_recovery_when_schedule_enabled(self):
+        repository = Mock()
+        repository.get_schedule_config.return_value = type('Schedule', (), {'enabled': True})()
+        repository.get_room_selection.return_value = object()
+        session_keeper = Mock()
+
+        with (
+            patch('backend.app.main.session_keeper', session_keeper),
+            patch('backend.app.main.repository', repository),
+            patch('backend.app.main.start_background_collection') as start_background_collection,
+        ):
+            from backend.app.main import handle_session_restored_from_cookie
+            handle_session_restored_from_cookie(recover_if_schedule_enabled=True)
+
+        session_keeper.restart.assert_called_once_with()
+        start_background_collection.assert_called_once_with()
+
+    def test_cookie_restored_session_skips_recovery_when_schedule_disabled(self):
+        repository = Mock()
+        repository.get_schedule_config.return_value = type('Schedule', (), {'enabled': False})()
+        repository.get_room_selection.return_value = object()
+        session_keeper = Mock()
+
+        with (
+            patch('backend.app.main.session_keeper', session_keeper),
+            patch('backend.app.main.repository', repository),
+            patch('backend.app.main.start_background_collection') as start_background_collection,
+        ):
+            from backend.app.main import handle_session_restored_from_cookie
+            handle_session_restored_from_cookie(recover_if_schedule_enabled=True)
+
+        session_keeper.restart.assert_called_once_with()
+        start_background_collection.assert_not_called()
 
 
 class ReadingsPaginationTests(unittest.TestCase):
