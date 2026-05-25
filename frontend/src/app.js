@@ -67,12 +67,17 @@ function setMessage(id, message, isError = false) {
   el.classList.toggle('error', isError);
 }
 
+function statusBadgeLabel(status) {
+  if (status.authenticationStatus === 'session_expired') return '登录已过期，需重新登录';
+  if (!status.authenticated) return '等待校园门户登录';
+  if (!status.roomSelection) return '已登录，待绑定宿舍';
+  return `已登录 · ${status.roomSelection.building} ${status.roomSelection.room}`;
+}
+
 async function refreshStatus(options = {}) {
   const { applyConfig = true } = options;
   const status = await api.get('/api/status');
-  const parts = [authenticationStatusLabel(status)];
-  if (status.roomSelection) parts.push(`${status.roomSelection.building} ${status.roomSelection.room}`);
-  statusBadge.textContent = parts.join(' · ');
+  statusBadge.textContent = statusBadgeLabel(status);
   if (applyConfig) applySavedConfig(status);
   updateLoginLink(status);
   updateControlStates(status);
@@ -218,19 +223,33 @@ function setReadingsLoading(isLoading) {
   chartSummary.textContent = '历史数据加载中。';
 }
 
+function cssToken(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function chartColors() {
+  return {
+    grid: cssToken('--line') || '#d8cfbd',
+    line: cssToken('--accent') || '#385342',
+    fill: 'rgba(56, 83, 66, .12)',
+    point: cssToken('--warning') || '#a86f25',
+    text: cssToken('--muted') || '#746f60',
+  };
+}
+
 function renderChart(readings) {
   const chartReadings = readings
     .filter((reading) => Number.isFinite(Number(reading.numericValue)))
     .sort((left, right) => String(left.collectedAt).localeCompare(String(right.collectedAt)));
   if (!readings.length) {
-    drawChartMessage('暂无趋势数据');
-    chartSummary.textContent = '定时采集成功后会显示趋势图。';
+    drawChartMessage('暂无余额走势');
+    chartSummary.textContent = '采集成功后会显示余额走势。';
     return;
   }
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const values = chartReadings.map((reading) => Number(reading.numericValue));
   if (!values.length) {
-    drawChartMessage('暂无趋势数据');
+    drawChartMessage('暂无余额走势');
     chartSummary.textContent = '当前页没有可绘制的有效数值。';
     return;
   }
@@ -240,7 +259,12 @@ function renderChart(readings) {
   const width = canvas.width - pad * 2;
   const height = canvas.height - pad * 2;
   const range = max - min || 1;
-  ctx.strokeStyle = '#e2e8f0';
+  const colors = chartColors();
+  const points = chartReadings.map((reading, index) => ({
+    x: pad + (chartReadings.length === 1 ? width : (width / (chartReadings.length - 1)) * index),
+    y: pad + height - ((Number(reading.numericValue) - min) / range) * height,
+  }));
+  ctx.strokeStyle = colors.grid;
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i += 1) {
     const y = pad + (height / 4) * i;
@@ -249,25 +273,30 @@ function renderChart(readings) {
     ctx.lineTo(canvas.width - pad, y);
     ctx.stroke();
   }
-  ctx.strokeStyle = '#2563eb';
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
+  });
+  ctx.lineTo(points[points.length - 1].x, pad + height);
+  ctx.lineTo(points[0].x, pad + height);
+  ctx.closePath();
+  ctx.fillStyle = colors.fill;
+  ctx.fill();
+  ctx.strokeStyle = colors.line;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  chartReadings.forEach((reading, index) => {
-    const x = pad + (chartReadings.length === 1 ? width : (width / (chartReadings.length - 1)) * index);
-    const y = pad + height - ((Number(reading.numericValue) - min) / range) * height;
-    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
   });
   ctx.stroke();
-  ctx.fillStyle = '#1d4ed8';
-  chartReadings.forEach((reading, index) => {
-    const x = pad + (chartReadings.length === 1 ? width : (width / (chartReadings.length - 1)) * index);
-    const y = pad + height - ((Number(reading.numericValue) - min) / range) * height;
+  ctx.fillStyle = colors.point;
+  points.forEach((point) => {
     ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
     ctx.fill();
   });
   const latest = chartReadings[chartReadings.length - 1];
-  chartSummary.textContent = `当前页最新数值：${formatReadingValue(latest)}，采集时间：${latest.collectedAt}`;
+  chartSummary.textContent = `当前页最新余额：${formatReadingValue(latest)}，采集时间：${latest.collectedAt}`;
 }
 
 function updatePaginationControls() {
@@ -298,9 +327,10 @@ function emptyReadingsMessage() {
 }
 
 function drawChartMessage(message) {
+  const colors = chartColors();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '18px sans-serif';
+  ctx.fillStyle = colors.text;
+  ctx.font = `18px ${cssToken('--font-body') || 'sans-serif'}`;
   ctx.fillText(message, 32, 60);
 }
 

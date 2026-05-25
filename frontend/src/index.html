@@ -9,84 +9,111 @@
   <body>
     <main class="shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">Dorm Electricity Monitor</p>
-          <h1>宿舍电费监控</h1>
-          <p>登录校园门户后选择宿舍，配置定时采集、电费趋势图和低余额邮件提醒。</p>
+        <div class="hero-copy">
+          <p class="eyebrow">宿舍用电值守</p>
+          <h1>宿舍电费值守台</h1>
+          <p>绑定宿舍后自动采集余额走势，在余额偏低前收到提醒。</p>
         </div>
-        <div id="statusBadge" class="badge">加载中</div>
+        <div class="hero-status">
+          <div id="statusBadge" class="badge">加载中</div>
+          <p>状态每分钟自动刷新</p>
+        </div>
       </header>
 
-      <section class="grid">
-        <div class="card">
-          <h2>1. 登录</h2>
-          <p class="hint">点击按钮进入校园门户登录页完成鉴权；登录成功后会自动回到本页面，失败则停留在校园登录页。</p>
-          <a id="loginLink" class="button-link" href="/portal/login">进入校园门户登录</a>
-          <p id="loginMessage" class="message"></p>
-        </div>
-
-        <form id="roomForm" class="card">
-          <h2>2. 选择宿舍</h2>
-          <label>所属楼栋<input name="building" required placeholder="例如：1号楼" /></label>
-          <label>房间<input name="room" required placeholder="例如：301" /></label>
-          <button type="submit">保存宿舍</button>
-          <p id="roomMessage" class="message"></p>
-        </form>
-
-        <form id="scheduleForm" class="card">
-          <h2>3. 定时采集</h2>
-          <label>间隔秒数<input name="intervalSeconds" type="number" min="1" value="3600" required /></label>
-          <label>开始时间<input name="startTime" type="time" value="08:00" required /></label>
-          <label>结束时间<input name="endTime" type="time" value="23:00" required /></label>
-          <label class="inline"><input name="enabled" type="checkbox" checked /> 启用定时采集</label>
-          <button type="submit">保存定时设置</button>
-          <button id="runOnceButton" type="button" class="secondary">立即采集一次</button>
-          <p id="scheduleMessage" class="message"></p>
-        </form>
-
-        <form id="alertForm" class="card">
-          <h2>4. 邮件提醒</h2>
-          <label>阈值<input name="threshold" type="number" step="0.01" value="10" required /></label>
-          <label>提醒邮箱<input name="recipientEmail" type="email" required /></label>
-          <label>冷却秒数<input name="cooldownSeconds" type="number" min="0" value="3600" /></label>
-          <label class="inline"><input name="enabled" type="checkbox" checked /> 启用提醒</label>
-          <button type="submit">保存提醒设置</button>
-          <p id="alertMessage" class="message"></p>
-        </form>
-      </section>
-
-      <section class="card chart-card">
-        <div class="section-title">
-          <div>
-            <h2>电费趋势</h2>
-            <p id="chartSummary" class="hint">定时采集成功后会显示趋势图。</p>
+      <div class="workspace">
+        <section class="config-grid" aria-label="值守配置">
+          <div class="card card-auth">
+            <p class="card-kicker">入口</p>
+            <h2>校园门户</h2>
+            <p class="hint">进入门户完成鉴权，回来后继续配置宿舍。</p>
+            <a id="loginLink" class="button-link" href="/portal/login">进入校园门户登录</a>
+            <p id="loginMessage" class="message"></p>
           </div>
-          <button id="refreshButton" type="button" class="secondary">刷新数据</button>
-        </div>
-        <p id="collectionMessage" class="message collection-message"></p>
-        <canvas id="trendCanvas" width="960" height="320" aria-label="电费趋势图"></canvas>
-        <div class="table-toolbar" aria-live="polite">
-          <p id="readingsMessage" class="message table-message">历史数据加载中。</p>
-          <div class="pagination-controls" aria-label="历史数据分页">
-            <label class="page-size-control">
-              每页
-              <select id="pageSizeSelect" aria-label="每页记录数">
-                <option value="10">10 条</option>
-                <option value="20" selected>20 条</option>
-              </select>
-            </label>
-            <button id="previousPageButton" type="button" class="secondary">上一页</button>
-            <span id="pageInfo" class="page-info">第 1 页</span>
-            <button id="nextPageButton" type="button" class="secondary">下一页</button>
+
+          <form id="roomForm" class="card card-room">
+            <p class="card-kicker">位置</p>
+            <h2>宿舍信息</h2>
+            <div class="field-grid two-fields">
+              <label>所属楼栋<input name="building" required placeholder="例如：1号楼" /></label>
+              <label>房间<input name="room" required placeholder="例如：301" /></label>
+            </div>
+            <button type="submit">保存宿舍</button>
+            <p id="roomMessage" class="message"></p>
+          </form>
+
+          <form id="scheduleForm" class="card card-schedule">
+            <p class="card-kicker">节奏</p>
+            <h2>自动采集</h2>
+            <div class="field-grid">
+              <label>间隔秒数<input name="intervalSeconds" type="number" min="1" value="3600" required /></label>
+              <label>开始时间<input name="startTime" type="time" value="08:00" required /></label>
+              <label>结束时间<input name="endTime" type="time" value="23:00" required /></label>
+            </div>
+            <label class="inline"><input name="enabled" type="checkbox" checked /> 启用定时采集</label>
+            <div class="button-row">
+              <button type="submit">保存采集设置</button>
+              <button id="runOnceButton" type="button" class="secondary">立即采集一次</button>
+            </div>
+            <p id="scheduleMessage" class="message"></p>
+          </form>
+
+          <form id="alertForm" class="card card-alert">
+            <p class="card-kicker">提醒</p>
+            <h2>低额提醒</h2>
+            <div class="field-grid">
+              <label>阈值<input name="threshold" type="number" step="0.01" value="10" required /></label>
+              <label>提醒邮箱<input name="recipientEmail" type="email" required /></label>
+              <label>冷却秒数<input name="cooldownSeconds" type="number" min="0" value="3600" /></label>
+            </div>
+            <label class="inline"><input name="enabled" type="checkbox" checked /> 启用提醒</label>
+            <button type="submit">保存提醒设置</button>
+            <p id="alertMessage" class="message"></p>
+          </form>
+        </section>
+
+        <section class="card chart-card">
+          <div class="section-title">
+            <div>
+              <p class="card-kicker">记录</p>
+              <h2>余额走势</h2>
+              <p id="chartSummary" class="hint">采集成功后会显示余额走势。</p>
+            </div>
+            <button id="refreshButton" type="button" class="secondary">刷新数据</button>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>时间</th><th>楼栋</th><th>房间</th><th>数值</th></tr></thead>
-            <tbody id="readingsBody"><tr><td colspan="4">历史数据加载中。</td></tr></tbody>
-          </table>
-        </div>
-      </section>
+          <p id="collectionMessage" class="message collection-message"></p>
+          <canvas id="trendCanvas" width="960" height="320" aria-label="余额走势图"></canvas>
+        </section>
+
+        <section class="card table-card">
+          <div class="section-title table-title">
+            <div>
+              <p class="card-kicker">明细</p>
+              <h2>历史记录</h2>
+            </div>
+          </div>
+          <div class="table-toolbar" aria-live="polite">
+            <p id="readingsMessage" class="message table-message">历史数据加载中。</p>
+            <div class="pagination-controls" aria-label="历史数据分页">
+              <label class="page-size-control">
+                每页
+                <select id="pageSizeSelect" aria-label="每页记录数">
+                  <option value="10">10 条</option>
+                  <option value="20" selected>20 条</option>
+                </select>
+              </label>
+              <button id="previousPageButton" type="button" class="secondary">上一页</button>
+              <span id="pageInfo" class="page-info">第 1 页</span>
+              <button id="nextPageButton" type="button" class="secondary">下一页</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>时间</th><th>楼栋</th><th>房间</th><th>数值</th></tr></thead>
+              <tbody id="readingsBody"><tr><td colspan="4">历史数据加载中。</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
     <script src="/app.js"></script>
   </body>
