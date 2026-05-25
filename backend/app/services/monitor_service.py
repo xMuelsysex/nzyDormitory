@@ -28,7 +28,7 @@ class MonitorService:
             raise ValidationError("Room selection is required before scheduling collection.")
         config = ScheduleConfig.from_payload(payload)
         self.repository.save_schedule_config(config, utc_now_iso())
-        self.scheduler.restart()
+        self.scheduler.restart(run_immediately=config.enabled)
         return {"scheduleConfig": schedule_to_payload(config)}
 
     def save_alert(self, payload: dict[str, object]) -> dict[str, object]:

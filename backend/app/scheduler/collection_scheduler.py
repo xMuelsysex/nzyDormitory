@@ -23,12 +23,13 @@ class CollectionScheduler:
         self._lock = threading.Lock()
         self._run_lock = threading.Lock()
 
-    def restart(self) -> None:
+    def restart(self, *, run_immediately: bool = False) -> None:
         with self._lock:
             self._cancel_locked()
             config = self.repository.get_schedule_config()
             if config and config.enabled:
-                self._start_collection_timer_locked(config.interval_seconds)
+                first_interval = 0 if run_immediately else config.interval_seconds
+                self._start_collection_timer_locked(first_interval)
                 logger.info("schedule_started")
 
     def stop(self) -> None:
@@ -50,6 +51,7 @@ class CollectionScheduler:
                     if getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired":
                         raise SessionExpiredError("Campus portal session expired. Please log in again.")
                     raise AuthenticationError("Campus portal login is required before collection.")
+                self.portal.keep_alive()
                 reading = self.portal.fetch_reading(selection)
                 reading_inserted = self.repository.insert_reading(reading, collection_window_start, run_id)
                 run_status = "success" if reading_inserted else "duplicate"

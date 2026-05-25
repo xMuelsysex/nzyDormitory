@@ -23,6 +23,7 @@ class FakePortal:
         )
         self.expire_next_fetch = False
         self.keep_alive_calls = 0
+        self.expire_next_keep_alive = False
 
     def fetch_reading(self, selection):
         if self.expire_next_fetch:
@@ -33,6 +34,10 @@ class FakePortal:
 
     def keep_alive(self):
         self.keep_alive_calls += 1
+        if self.expire_next_keep_alive:
+            self.authenticated = False
+            self.authentication_status = "session_expired"
+            raise SessionExpiredError("Campus portal session expired. Please log in again.")
 
     def mark_logged_in(self):
         self.authenticated = True
@@ -153,11 +158,27 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
 
         self.assertEqual(result["reading"]["numericValue"], 20.93)
         self.assertEqual(len(self.repository.list_readings()), 1)
+        self.assertEqual(self.portal.keep_alive_calls, 1)
 
         runs = self.repository.list_collection_runs()
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["status"], "success")
         self.assertTrue(runs[0]["readingInserted"])
+
+    def test_collection_refreshes_session_before_fetch_and_records_keep_alive_expiry(self):
+        self.portal.expire_next_keep_alive = True
+
+        with self.assertRaises(SessionExpiredError):
+            self.scheduler.run_once()
+
+        self.assertEqual(self.portal.keep_alive_calls, 1)
+        self.assertFalse(self.portal.authenticated)
+        self.assertEqual(self.portal.authentication_status, "session_expired")
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "failed")
+        self.assertEqual(runs[0]["errorCode"], "SESSION_EXPIRED")
+        self.assertEqual(len(self.repository.list_readings()), 0)
 
     def test_authentication_failure_records_failed_run(self):
         self.portal.authenticated = False
@@ -249,6 +270,13 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
             self.scheduler.restart()
 
         self.assertEqual([timer.interval for timer in FakeTimer.created], [3600])
+        self.assertTrue(FakeTimer.created[0].started)
+
+    def test_restart_can_schedule_immediate_collection_timer(self):
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            self.scheduler.restart(run_immediately=True)
+
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [0])
         self.assertTrue(FakeTimer.created[0].started)
 
     def test_session_expiry_notifies_alert_service(self):
