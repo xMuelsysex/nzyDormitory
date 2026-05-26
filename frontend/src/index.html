@@ -7,16 +7,17 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <a class="skip-link" href="#dashboard">跳到值守台</a>
+    <main id="dashboard" class="shell">
       <header class="hero">
         <div class="hero-copy">
           <p class="eyebrow">宿舍用电值守</p>
           <h1>宿舍电费值守台</h1>
           <p>绑定宿舍后自动采集余额走势，在余额偏低前收到提醒。</p>
         </div>
-        <div class="hero-status">
+        <div class="hero-status" aria-live="polite">
           <div id="statusBadge" class="badge">加载中</div>
-          <p>状态每分钟自动刷新</p>
+          <p class="status-note">状态每分钟自动刷新</p>
         </div>
       </header>
 
@@ -30,24 +31,24 @@
             <p id="loginMessage" class="message"></p>
           </div>
 
-          <form id="roomForm" class="card card-room">
+          <form id="roomForm" class="card card-room" aria-describedby="roomMessage">
             <p class="card-kicker">位置</p>
             <h2>宿舍信息</h2>
             <div class="field-grid two-fields">
-              <label>所属楼栋<input name="building" required placeholder="例如：1号楼" /></label>
-              <label>房间<input name="room" required placeholder="例如：301" /></label>
+              <label><span>所属楼栋 <span class="required-mark" aria-hidden="true">*</span></span><input name="building" required placeholder="例如：1号楼" autocomplete="off" /></label>
+              <label><span>房间 <span class="required-mark" aria-hidden="true">*</span></span><input name="room" required placeholder="例如：301" autocomplete="off" /></label>
             </div>
             <button type="submit">保存宿舍</button>
             <p id="roomMessage" class="message"></p>
           </form>
 
-          <form id="scheduleForm" class="card card-schedule">
+          <form id="scheduleForm" class="card card-schedule" aria-describedby="scheduleMessage">
             <p class="card-kicker">节奏</p>
             <h2>自动采集</h2>
             <div class="field-grid">
-              <label>间隔秒数<input name="intervalSeconds" type="number" min="1" value="3600" required /></label>
-              <label>开始时间<input name="startTime" type="time" value="08:00" required /></label>
-              <label>结束时间<input name="endTime" type="time" value="23:00" required /></label>
+              <label><span>间隔秒数 <span class="required-mark" aria-hidden="true">*</span></span><input name="intervalSeconds" type="number" min="1" value="3600" required inputmode="numeric" /></label>
+              <label><span>开始时间 <span class="required-mark" aria-hidden="true">*</span></span><input name="startTime" type="time" value="08:00" required /></label>
+              <label><span>结束时间 <span class="required-mark" aria-hidden="true">*</span></span><input name="endTime" type="time" value="23:00" required /></label>
             </div>
             <label class="inline"><input name="enabled" type="checkbox" checked /> 启用定时采集</label>
             <div class="button-row">
@@ -57,12 +58,12 @@
             <p id="scheduleMessage" class="message"></p>
           </form>
 
-          <form id="alertForm" class="card card-alert">
+          <form id="alertForm" class="card card-alert" aria-describedby="alertMessage">
             <p class="card-kicker">提醒</p>
             <h2>低额提醒</h2>
             <div class="field-grid">
-              <label>阈值<input name="threshold" type="number" step="0.01" value="10" required /></label>
-              <label>提醒邮箱<input name="recipientEmail" type="email" required /></label>
+              <label><span>阈值 <span class="required-mark" aria-hidden="true">*</span></span><input name="threshold" type="number" step="0.01" value="10" required inputmode="decimal" /></label>
+              <label><span>提醒邮箱 <span class="required-mark" aria-hidden="true">*</span></span><input name="recipientEmail" type="email" required autocomplete="email" /></label>
               <label>冷却秒数<input name="cooldownSeconds" type="number" min="0" value="3600" /></label>
             </div>
             <label class="inline"><input name="enabled" type="checkbox" checked /> 启用提醒</label>
@@ -81,7 +82,7 @@
             <button id="refreshButton" type="button" class="secondary">刷新数据</button>
           </div>
           <p id="collectionMessage" class="message collection-message"></p>
-          <canvas id="trendCanvas" width="960" height="320" aria-label="余额走势图"></canvas>
+          <canvas id="trendCanvas" width="960" height="320" aria-label="余额走势图" role="img"></canvas>
         </section>
 
         <section class="card table-card">
@@ -108,6 +109,7 @@
           </div>
           <div class="table-wrap">
             <table>
+              <caption class="sr-only">宿舍电费历史采集记录</caption>
               <thead><tr><th>时间</th><th>楼栋</th><th>房间</th><th>数值</th></tr></thead>
               <tbody id="readingsBody"><tr><td colspan="4">历史数据加载中。</td></tr></tbody>
             </table>
