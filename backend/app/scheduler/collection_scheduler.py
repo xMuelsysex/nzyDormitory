@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, tzinfo
+from datetime import datetime, tzinfo
 import logging
 import threading
 
@@ -8,7 +8,7 @@ from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.integrations.campus_portal import CampusPortalClient
 from backend.app.persistence.repository import Repository
 from backend.app.shared.errors import AppError, AuthenticationError, SchedulerError, SessionExpiredError
-from backend.app.shared.http import utc_now_iso
+from backend.app.shared.http import app_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class CollectionScheduler:
             selection = self.repository.get_room_selection()
             if selection is None:
                 raise SchedulerError("Room selection is required before collection.")
-            started_at = utc_now_iso()
+            started_at = app_now_iso()
             collection_window_start = self._collection_window_start()
             run_id = self.repository.start_collection_run(selection, started_at, collection_window_start)
             reading_inserted = False
@@ -55,7 +55,7 @@ class CollectionScheduler:
                 reading = self.portal.fetch_reading(selection)
                 reading_inserted = self.repository.insert_reading(reading, collection_window_start, run_id)
                 run_status = "success" if reading_inserted else "duplicate"
-                self.repository.finish_collection_run(run_id, utc_now_iso(), run_status, reading_inserted)
+                self.repository.finish_collection_run(run_id, app_now_iso(), run_status, reading_inserted)
                 run_finalized = True
                 logger.info(
                     "collection_success",
@@ -72,7 +72,7 @@ class CollectionScheduler:
                 if not run_finalized:
                     self.repository.finish_collection_run(
                         run_id,
-                        utc_now_iso(),
+                        app_now_iso(),
                         "failed",
                         reading_inserted,
                         exc.code,
@@ -84,7 +84,7 @@ class CollectionScheduler:
                 if not run_finalized:
                     self.repository.finish_collection_run(
                         run_id,
-                        utc_now_iso(),
+                        app_now_iso(),
                         "failed",
                         reading_inserted,
                         "UNEXPECTED_ERROR",
@@ -99,10 +99,10 @@ class CollectionScheduler:
             else:
                 logger.info("collection_skipped_outside_window")
         except AppError as exc:
-            self.repository.record_failure(utc_now_iso(), exc.code, exc.message)
+            self.repository.record_failure(app_now_iso(), exc.code, exc.message)
             logger.warning("collection_failed", extra={"error_code": exc.code})
         except Exception:
-            self.repository.record_failure(utc_now_iso(), "UNEXPECTED_ERROR", "Unexpected collection failure.")
+            self.repository.record_failure(app_now_iso(), "UNEXPECTED_ERROR", "Unexpected collection failure.")
             logger.exception("collection_failed", extra={"error_code": "UNEXPECTED_ERROR"})
         finally:
             with self._lock:
@@ -117,7 +117,7 @@ class CollectionScheduler:
         if not callable(notify):
             return
         try:
-            notify(utc_now_iso())
+            notify(app_now_iso())
         except Exception:
             logger.warning("session_expired_alert_failed", exc_info=True)
 
@@ -131,10 +131,10 @@ class CollectionScheduler:
     def _collection_window_start(self) -> str:
         config = self.repository.get_schedule_config()
         interval_seconds = max(1, config.interval_seconds if config else 1)
-        now = datetime.now(UTC).replace(microsecond=0)
+        now = datetime.now(self.timezone).replace(microsecond=0)
         epoch_seconds = int(now.timestamp())
         window_epoch = epoch_seconds - (epoch_seconds % interval_seconds)
-        return datetime.fromtimestamp(window_epoch, UTC).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(window_epoch, self.timezone).isoformat()
 
     def _start_collection_timer_locked(self, interval_seconds: int) -> None:
         self._timer = threading.Timer(interval_seconds, self._run_and_reschedule)

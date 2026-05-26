@@ -1,11 +1,12 @@
 import errno
 import unittest
+from datetime import datetime
 from io import BytesIO
 from unittest.mock import Mock, patch
 
 from backend.app.main import DormElectricityHandler, FRONTEND_DIR, parse_readings_pagination
 from backend.app.shared.errors import ValidationError
-from backend.app.shared.http import is_client_disconnect, read_json_body, send_error
+from backend.app.shared.http import app_now_iso, is_client_disconnect, read_json_body, send_error
 
 
 class StaticFileTests(unittest.TestCase):
@@ -173,6 +174,16 @@ class JsonBodyTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             read_json_body(handler)
+
+
+class AppTimeTests(unittest.TestCase):
+    def test_app_now_defaults_to_beijing_time(self):
+        with patch.dict('os.environ', {}, clear=True):
+            timestamp = app_now_iso()
+
+        parsed = datetime.fromisoformat(timestamp)
+        self.assertEqual(parsed.utcoffset().total_seconds(), 8 * 60 * 60)
+        self.assertNotIn('Z', timestamp)
 
 
 class ClientDisconnectTests(unittest.TestCase):

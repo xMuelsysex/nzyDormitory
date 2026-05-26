@@ -3,10 +3,12 @@ from __future__ import annotations
 import errno
 import json
 import logging
-from datetime import UTC, datetime
+import os
+from datetime import datetime, timedelta, timezone, tzinfo
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.app.shared.errors import AppError, ValidationError
 
@@ -21,8 +23,22 @@ _CLIENT_DISCONNECT_ERRNOS = {
 }
 
 
+def app_now_iso() -> str:
+    return datetime.now(_app_timezone()).replace(microsecond=0).isoformat()
+
+
 def utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return app_now_iso()
+
+
+def _app_timezone() -> tzinfo:
+    timezone_name = os.getenv("APP_TIMEZONE", "Asia/Shanghai")
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        if timezone_name in {"Asia/Shanghai", "Asia/Chongqing"}:
+            return timezone(timedelta(hours=8), name=timezone_name)
+        raise
 
 
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:

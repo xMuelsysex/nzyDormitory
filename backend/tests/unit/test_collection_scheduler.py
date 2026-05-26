@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import UTC
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -249,6 +249,21 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         runs = self.repository.list_collection_runs()
         self.assertEqual(runs[-1]["status"], "duplicate")
         self.assertFalse(runs[-1]["readingInserted"])
+
+    def test_collection_window_start_uses_scheduler_timezone(self):
+        beijing = timezone(timedelta(hours=8), name="Asia/Shanghai")
+        scheduler = CollectionScheduler(self.repository, self.portal, self.alerts, beijing)
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                fixed_now = datetime(2026, 5, 13, 10, 17, 42, tzinfo=beijing)
+                return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+        with patch("backend.app.scheduler.collection_scheduler.datetime", FixedDatetime):
+            window_start = scheduler._collection_window_start()
+
+        self.assertEqual(window_start, "2026-05-13T10:00:00+08:00")
 
     def test_scheduled_unexpected_failure_records_brief_status(self):
         scheduler = CollectionScheduler(self.repository, BrokenPortal(), self.alerts, UTC)
