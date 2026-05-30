@@ -18,7 +18,7 @@ from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.scheduler.session_keeper import SessionKeeper
 from backend.app.services.monitor_service import MonitorService
 from backend.app.shared.errors import ValidationError
-from backend.app.shared.http import read_form_body, read_json_body, send_bytes, send_error, send_html, send_json, send_redirect, utc_now_iso
+from backend.app.shared.http import app_now_iso, read_form_body, read_json_body, send_bytes, send_error, send_html, send_json, send_redirect
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -288,7 +288,7 @@ def initialize_portal_session() -> None:
     if restored:
         handle_session_restored_from_cookie(recover_if_schedule_enabled=True)
     elif settings.persist_portal_cookies and portal.authentication_status == "session_expired":
-        alert_service.notify_session_expired(utc_now_iso())
+        alert_service.notify_session_expired(app_now_iso())
 
 
 def _schedule_enabled() -> bool:

@@ -14,7 +14,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from backend.app.config.settings import Settings
 from backend.app.services.models import ElectricityReading, RoomSelection
 from backend.app.shared.errors import AuthenticationError, PortalFetchError, PortalParseError, SessionExpiredError
-from backend.app.shared.http import utc_now_iso
+from backend.app.shared.http import app_now_iso
 
 
 _NJUCM_WEBVPN_HOST = "webvpn.njucm.edu.cn"
@@ -331,7 +331,7 @@ class CampusPortalClient:
             value, unit = parse_electricity_value(body)
             self.save_cookies()
             return ElectricityReading(
-                collected_at=utc_now_iso(),
+                collected_at=app_now_iso(),
                 building=selection.building,
                 room=selection.room,
                 numeric_value=value,

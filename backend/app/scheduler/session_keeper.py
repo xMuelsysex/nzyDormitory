@@ -7,7 +7,7 @@ from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.integrations.campus_portal import CampusPortalClient
 from backend.app.persistence.repository import Repository
 from backend.app.shared.errors import AppError, SessionExpiredError
-from backend.app.shared.http import utc_now_iso
+from backend.app.shared.http import app_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +50,13 @@ class SessionKeeper:
             if was_session_expired:
                 logger.info("portal_session_still_expired")
                 raise
-            failed_at = utc_now_iso()
+            failed_at = app_now_iso()
             self.repository.record_failure(failed_at, exc.code, exc.message)
             self._notify_session_expired(failed_at)
             logger.warning("portal_session_expired")
             raise
         except AppError as exc:
-            self.repository.record_failure(utc_now_iso(), exc.code, exc.message)
+            self.repository.record_failure(app_now_iso(), exc.code, exc.message)
             logger.warning("portal_session_keep_alive_failed", extra={"error_code": exc.code})
             raise
 
@@ -76,7 +76,7 @@ class SessionKeeper:
         except AppError:
             should_continue = self._should_keep_scheduled()
         except Exception:
-            self.repository.record_failure(utc_now_iso(), "UNEXPECTED_ERROR", "Unexpected portal keep-alive failure.")
+            self.repository.record_failure(app_now_iso(), "UNEXPECTED_ERROR", "Unexpected portal keep-alive failure.")
             logger.exception("portal_session_keep_alive_failed", extra={"error_code": "UNEXPECTED_ERROR"})
             should_continue = self._should_keep_scheduled()
         finally:
@@ -92,7 +92,6 @@ class SessionKeeper:
 
     def _session_expired(self) -> bool:
         return getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired"
-
 
     def _start_timer_locked(self) -> None:
         generation = self._generation
