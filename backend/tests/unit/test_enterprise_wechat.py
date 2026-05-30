@@ -139,12 +139,14 @@ class EnterpriseWechatClientTests(unittest.TestCase):
     def test_import_cookie_verifies_session_and_saves_authenticated_state(self):
         opener = FakeWechatOpener(["<html><body>一卡通 宿舍电费</body></html>"])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
-            client = EnterpriseWechatClient(test_settings())
+            client = EnterpriseWechatClient(test_settings(), clock=lambda: "2026-05-30T00:00:00Z")
 
         client.import_cookies("ASP.NET_SessionId=abc")
 
         self.assertTrue(client.authenticated)
         self.assertEqual(client.authentication_status, "authenticated")
+        self.assertEqual(client.last_verified_at, "2026-05-30T00:00:00Z")
+        self.assertIsNone(client.last_keep_alive_error)
         self.assertEqual(len(opener.requests), 1)
 
     def test_import_cookie_rejects_empty_unauthenticated_response(self):
@@ -157,6 +159,45 @@ class EnterpriseWechatClientTests(unittest.TestCase):
 
         self.assertFalse(client.authenticated)
         self.assertEqual(client.authentication_status, "unauthenticated")
+
+    def test_keep_alive_records_success_timestamp_and_clears_error(self):
+        opener = FakeWechatOpener(["<html><body>一卡通 宿舍电费</body></html>"])
+        with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
+            client = EnterpriseWechatClient(test_settings(), clock=lambda: "2026-05-30T00:05:00Z")
+        client.authenticated = True
+        client.last_keep_alive_error = "old error"
+
+        client.keep_alive()
+
+        self.assertEqual(client.last_verified_at, "2026-05-30T00:05:00Z")
+        self.assertEqual(client.last_keep_alive_at, "2026-05-30T00:05:00Z")
+        self.assertIsNone(client.last_keep_alive_error)
+
+    def test_keep_alive_records_redacted_failure_status(self):
+        opener = FakeWechatOpener([""])
+        with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
+            client = EnterpriseWechatClient(test_settings())
+        client.authenticated = True
+
+        with self.assertRaises(SessionExpiredError):
+            client.keep_alive()
+
+        self.assertEqual(client.authentication_status, "session_expired")
+        self.assertIn("SESSION_EXPIRED", client.last_keep_alive_error)
+
+    def test_status_payload_exposes_keep_alive_observability(self):
+        client = EnterpriseWechatClient(test_settings(), clock=lambda: "2026-05-30T00:05:00Z")
+        client.authenticated = True
+        client.authentication_status = "authenticated"
+        client.last_verified_at = "2026-05-30T00:04:00Z"
+        client.last_keep_alive_at = "2026-05-30T00:05:00Z"
+
+        status = client.status_payload()
+
+        self.assertEqual(status["authenticationStatus"], "authenticated")
+        self.assertEqual(status["lastVerifiedAt"], "2026-05-30T00:04:00Z")
+        self.assertEqual(status["lastKeepAliveAt"], "2026-05-30T00:05:00Z")
+        self.assertIsNone(status["lastKeepAliveError"])
 
     def test_fetch_reading_posts_verified_selfhelp_elect_query_contract(self):
         opener = FakeWechatOpener([

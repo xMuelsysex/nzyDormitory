@@ -90,6 +90,9 @@ class ElectricitySourceRouter:
         self._active_source_name = "enterprise_wechat"
 
     def _client_status(self, client: EnterpriseWechatClient | CampusPortalClient) -> dict[str, object]:
+        status_payload = getattr(client, "status_payload", None)
+        if callable(status_payload):
+            return status_payload()
         return {
             "authenticated": client.authenticated,
             "authenticationStatus": getattr(client, "authentication_status", "authenticated" if client.authenticated else "unauthenticated"),

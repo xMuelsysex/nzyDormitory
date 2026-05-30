@@ -10,6 +10,7 @@ class FakeSource:
         self.source_name = source_name
         self.authenticated = authenticated
         self.authentication_status = "authenticated" if authenticated else "unauthenticated"
+        self.status_payload_value = None
         self.keep_alive_calls = 0
         self.fetch_calls = 0
         self.expire_next_keep_alive = False
@@ -41,6 +42,14 @@ class FakeSource:
     def reset_session(self):
         self.authenticated = False
         self.authentication_status = "unauthenticated"
+
+    def status_payload(self):
+        if self.status_payload_value is not None:
+            return self.status_payload_value
+        return {
+            "authenticated": self.authenticated,
+            "authenticationStatus": self.authentication_status,
+        }
 
 
 class ElectricitySourceRouterTests(unittest.TestCase):
@@ -91,3 +100,20 @@ class ElectricitySourceRouterTests(unittest.TestCase):
 
         self.assertFalse(status["enterpriseWechat"]["authenticated"])
         self.assertTrue(status["campusPortal"]["authenticated"])
+
+    def test_status_by_source_preserves_source_observability_fields(self):
+        wechat = FakeSource("enterprise_wechat", authenticated=True)
+        wechat.status_payload_value = {
+            "authenticated": True,
+            "authenticationStatus": "authenticated",
+            "lastVerifiedAt": "2026-05-30T00:00:00Z",
+            "lastKeepAliveAt": "2026-05-30T00:05:00Z",
+            "lastKeepAliveError": None,
+        }
+        router = ElectricitySourceRouter(wechat, FakeSource("campus_portal"))
+
+        status = router.status_by_source()
+
+        self.assertEqual(status["enterpriseWechat"]["lastVerifiedAt"], "2026-05-30T00:00:00Z")
+        self.assertEqual(status["enterpriseWechat"]["lastKeepAliveAt"], "2026-05-30T00:05:00Z")
+        self.assertIsNone(status["enterpriseWechat"]["lastKeepAliveError"])

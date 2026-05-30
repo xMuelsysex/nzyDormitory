@@ -74,6 +74,37 @@ python3 tools/import_wechat_har.py path/to/enterprise-wechat.har --base-url http
 
 Use `--dry-run` to check whether the HAR contains the needed cookie and room fields without importing anything. Raw HAR files contain login credentials; do not paste them into chat or commit them. The repository ignores `*.har` by default.
 
+### Enterprise WeChat cookie lifetime probe
+
+If the HAR contains a reusable `ASP.NET_SessionId`, import it once and let the server keep it alive instead of asking users to capture traffic repeatedly. Enable cookie persistence on a trusted host:
+
+```text
+PERSIST_PORTAL_COOKIES=true
+ENTERPRISE_WECHAT_COOKIE_PATH=./data/enterprise_wechat_cookies.txt
+SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
+```
+
+To measure how long the captured cookie remains usable, run the probe helper. It reads the cookie and room fields from the HAR, verifies the session, then repeatedly performs the enterprise WeChat electricity query until it fails or is stopped. Cookie values are never printed.
+
+```bash
+python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --interval 300
+```
+
+Run one check only:
+
+```bash
+python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --once
+```
+
+If the HAR has no room query, provide the room explicitly or use session-page keep-alive only:
+
+```bash
+python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --building C20 --room 2324
+python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --keep-alive-only --interval 300
+```
+
+The dashboard `/api/status` response includes enterprise WeChat `lastVerifiedAt`, `lastKeepAliveAt`, and `lastKeepAliveError` fields so server-side keep-alive health can be inspected without exposing Cookie values.
+
 ### Enterprise WeChat HAR diagnostic fallback
 
 The diagnostic helper is offline and uses only the Python standard library. It prints a redacted report with matched enterprise WeChat paths, OAuth-like query key presence, Cookie/Set-Cookie names, User-Agent markers, candidate `.ashx`/`.aspx` endpoints, and likely electricity payload signals.

@@ -7,6 +7,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from typing import Callable
 from http.cookiejar import CookieJar, LoadError, MozillaCookieJar
 from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener
@@ -46,13 +47,17 @@ class EnterpriseWechatElectFields:
 
 
 class EnterpriseWechatClient:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, clock: Callable[[], str] = utc_now_iso):
         self.settings = settings
         self._lock = threading.RLock()
         self.cookie_jar = self._new_cookie_jar()
         self.opener = build_opener(HTTPCookieProcessor(self.cookie_jar))
         self.authenticated = False
         self.authentication_status = "unauthenticated"
+        self.last_verified_at: str | None = None
+        self.last_keep_alive_at: str | None = None
+        self.last_keep_alive_error: str | None = None
+        self._clock = clock
 
     @property
     def source_name(self) -> str:
@@ -93,15 +98,20 @@ class EnterpriseWechatClient:
                 raise PortalFetchError(diagnosis.message)
             if diagnosis.kind == "unknown":
                 raise PortalParseError(diagnosis.message)
-            self.authenticated = True
-            self.authentication_status = "authenticated"
+            self._mark_verified_locked()
             return True
 
     def keep_alive(self) -> None:
         with self._lock:
             if not self.authenticated:
                 return
-            self.verify_session()
+            try:
+                self.verify_session()
+            except (AuthenticationError, SessionExpiredError, PortalFetchError, PortalParseError) as exc:
+                self._mark_keep_alive_error_locked(exc)
+                raise
+            self.last_keep_alive_at = self.last_verified_at
+            self.last_keep_alive_error = None
             self.save_cookies()
 
     def verify_persisted_session(self) -> bool:
@@ -127,6 +137,9 @@ class EnterpriseWechatClient:
             self._rebuild_opener_locked()
             self.authenticated = False
             self.authentication_status = "unauthenticated"
+            self.last_verified_at = None
+            self.last_keep_alive_at = None
+            self.last_keep_alive_error = None
             self.clear_persisted_cookies()
 
     def save_cookies(self) -> None:
@@ -185,8 +198,7 @@ class EnterpriseWechatClient:
 
     def _reading_from_body(self, body: str, selection: RoomSelection) -> ElectricityReading:
         value, unit = parse_enterprise_wechat_electricity_value(body, selfhelp_query=True)
-        self.authenticated = True
-        self.authentication_status = "authenticated"
+        self._mark_verified_locked()
         self.save_cookies()
         return ElectricityReading(
             collected_at=utc_now_iso(),
@@ -204,6 +216,26 @@ class EnterpriseWechatClient:
             raise SessionExpiredError("Enterprise WeChat session expired. Please import a fresh session cookie.")
         if diagnosis.kind == "portal_error":
             raise PortalFetchError(diagnosis.message)
+
+    def status_payload(self) -> dict[str, object]:
+        return {
+            "authenticated": self.authenticated,
+            "authenticationStatus": self.authentication_status,
+            "lastVerifiedAt": self.last_verified_at,
+            "lastKeepAliveAt": self.last_keep_alive_at,
+            "lastKeepAliveError": self.last_keep_alive_error,
+        }
+
+    def _mark_verified_locked(self) -> None:
+        self.authenticated = True
+        self.authentication_status = "authenticated"
+        self.last_verified_at = self._clock()
+        self.last_keep_alive_error = None
+
+    def _mark_keep_alive_error_locked(self, error: Exception) -> None:
+        code = getattr(error, "code", error.__class__.__name__)
+        message = getattr(error, "message", str(error))
+        self.last_keep_alive_error = f"{code}: {message}"
 
     def _fetch_text(self, url: str) -> str:
         if not _is_allowed_enterprise_wechat_url(url, self.settings.enterprise_wechat_electricity_url):

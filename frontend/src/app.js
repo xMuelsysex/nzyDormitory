@@ -105,11 +105,16 @@ function renderSourceState(status) {
   const wechat = status.sources?.enterpriseWechat;
   if (!wechat) return;
   if (wechat.authenticationStatus === 'session_expired') {
-    setMessage('#wechatMessage', '企业微信会话已过期，请重新导入 Cookie。', true);
+    const errorText = wechat.lastKeepAliveError ? `最近保活失败：${wechat.lastKeepAliveError}` : '请重新导入 Cookie。';
+    setMessage('#wechatMessage', `企业微信会话已过期，${errorText}`, true);
     return;
   }
   if (wechat.authenticated) {
-    setMessage('#wechatMessage', '企业微信会话已导入，采集会优先使用企业微信。');
+    const details = [];
+    if (wechat.lastKeepAliveAt) details.push(`上次保活：${wechat.lastKeepAliveAt}`);
+    if (wechat.lastVerifiedAt && !wechat.lastKeepAliveAt) details.push(`上次校验：${wechat.lastVerifiedAt}`);
+    const suffix = details.length ? `（${details.join('，')}）` : '';
+    setMessage('#wechatMessage', `企业微信会话已导入，采集会优先使用企业微信。${suffix}`);
     return;
   }
   const currentMessage = document.querySelector('#wechatMessage')?.textContent || '';
