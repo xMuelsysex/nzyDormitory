@@ -49,8 +49,8 @@ class CollectionScheduler:
             try:
                 if not self.portal.authenticated:
                     if getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired":
-                        raise SessionExpiredError("Campus portal session expired. Please log in again.")
-                    raise AuthenticationError("Campus portal login is required before collection.")
+                        raise SessionExpiredError(self._session_expired_message())
+                    raise AuthenticationError("Enterprise WeChat session import or campus portal login is required before collection.")
                 self.portal.keep_alive()
                 reading = self.portal.fetch_reading(selection)
                 reading_inserted = self.repository.insert_reading(reading, collection_window_start, run_id)
@@ -95,7 +95,10 @@ class CollectionScheduler:
     def _run_and_reschedule(self) -> None:
         try:
             if self._inside_active_window():
-                self.run_once()
+                if self._session_expired():
+                    logger.info("collection_skipped_session_expired")
+                else:
+                    self.run_once()
             else:
                 logger.info("collection_skipped_outside_window")
         except AppError as exc:
@@ -127,6 +130,17 @@ class CollectionScheduler:
             return False
         now = datetime.now(self.timezone).strftime("%H:%M")
         return config.start_time <= now <= config.end_time
+
+    def _session_expired(self) -> bool:
+        return (
+            not self.portal.authenticated
+            and getattr(self.portal, "authentication_status", "unauthenticated") == "session_expired"
+        )
+
+    def _session_expired_message(self) -> str:
+        if getattr(self.portal, "active_source", "campus_portal") == "enterprise_wechat":
+            return "Enterprise WeChat session expired. Please import a fresh session cookie."
+        return "Campus portal session expired. Please log in again."
 
     def _collection_window_start(self) -> str:
         config = self.repository.get_schedule_config()

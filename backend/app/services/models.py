@@ -60,6 +60,7 @@ class ElectricityReading:
     room: str
     numeric_value: float
     unit: str = ""
+    source: str = "campus_portal"
 
 
 @dataclass(frozen=True)

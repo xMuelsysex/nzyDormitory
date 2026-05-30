@@ -11,6 +11,14 @@ from backend.app.shared.errors import AuthenticationError, ValidationError
 class FakePortal:
     def __init__(self, authenticated=False):
         self.authenticated = authenticated
+        self.authentication_status = "authenticated" if authenticated else "unauthenticated"
+        self.active_source = "campus_portal"
+
+    def status_by_source(self):
+        return {
+            "enterpriseWechat": {"authenticated": False, "authenticationStatus": "unauthenticated"},
+            "campusPortal": {"authenticated": self.authenticated, "authenticationStatus": self.authentication_status},
+        }
 
 
 class FakeScheduler:
@@ -32,11 +40,28 @@ class MonitorServiceTests(unittest.TestCase):
         service = MonitorService(repository, FakePortal(authenticated), scheduler)
         return service, scheduler
 
-    def test_room_selection_requires_portal_login(self):
+    def test_room_selection_requires_authenticated_electricity_source(self):
         service, _ = self.make_service(authenticated=False)
 
-        with self.assertRaises(AuthenticationError):
+        with self.assertRaises(AuthenticationError) as context:
             service.save_room({"building": "1号楼", "room": "301"})
+
+        self.assertIn("Enterprise WeChat session import or campus portal login", context.exception.message)
+
+    def test_schedule_requires_authenticated_electricity_source(self):
+        service, _ = self.make_service(authenticated=False)
+
+        with self.assertRaises(AuthenticationError) as context:
+            service.save_schedule(
+                {
+                    "intervalSeconds": 60,
+                    "startTime": "08:00",
+                    "endTime": "22:00",
+                    "enabled": True,
+                }
+            )
+
+        self.assertIn("Enterprise WeChat session import or campus portal login", context.exception.message)
 
     def test_schedule_requires_room_selection(self):
         service, _ = self.make_service(authenticated=True)
@@ -91,6 +116,8 @@ class MonitorServiceTests(unittest.TestCase):
 
         self.assertFalse(status["authenticated"])
         self.assertEqual(status["authenticationStatus"], "session_expired")
+        self.assertEqual(status["authenticationSource"], "campus_portal")
+        self.assertFalse(status["sources"]["enterpriseWechat"]["authenticated"])
 
     def test_status_and_readings_expose_database_current_reading(self):
         service, _ = self.make_service(authenticated=False)

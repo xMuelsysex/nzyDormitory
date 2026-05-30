@@ -12,6 +12,7 @@ DEFAULT_CAMPUS_WEBVPN_URL = (
 DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL = (
     "https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx"
 )
+DEFAULT_ENTERPRISE_WECHAT_ELECTRICITY_URL = "http://wx.njucm.edu.cn/work/njucm/card.aspx?wid=37"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class Settings:
     database_path: Path
     campus_login_url: str
     campus_electricity_url: str
+    enterprise_wechat_electricity_url: str
     smtp_host: str
     smtp_port: int
     smtp_username: str
@@ -31,6 +33,7 @@ class Settings:
     session_keep_alive_interval_seconds: int = 300
     persist_portal_cookies: bool = False
     portal_cookie_path: Path = Path("data/portal_cookies.txt")
+    enterprise_wechat_cookie_path: Path = Path("data/enterprise_wechat_cookies.txt")
 
     @property
     def zoneinfo(self) -> tzinfo:
@@ -52,6 +55,7 @@ def load_settings() -> Settings:
         database_path=data_dir / "dorm_electricity.sqlite3",
         campus_login_url=os.getenv("CAMPUS_LOGIN_URL", DEFAULT_CAMPUS_WEBVPN_URL),
         campus_electricity_url=os.getenv("CAMPUS_ELECTRICITY_URL", DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL),
+        enterprise_wechat_electricity_url=os.getenv("ENTERPRISE_WECHAT_ELECTRICITY_URL", DEFAULT_ENTERPRISE_WECHAT_ELECTRICITY_URL),
         smtp_host=os.getenv("SMTP_HOST", ""),
         smtp_port=int(os.getenv("SMTP_PORT", "587")),
         smtp_username=os.getenv("SMTP_USERNAME", ""),
@@ -60,6 +64,9 @@ def load_settings() -> Settings:
         session_keep_alive_interval_seconds=int(os.getenv("SESSION_KEEP_ALIVE_INTERVAL_SECONDS", "300")),
         persist_portal_cookies=_env_bool("PERSIST_PORTAL_COOKIES", False),
         portal_cookie_path=Path(os.getenv("PORTAL_COOKIE_PATH", str(data_dir / "portal_cookies.txt"))),
+        enterprise_wechat_cookie_path=Path(
+            os.getenv("ENTERPRISE_WECHAT_COOKIE_PATH", str(data_dir / "enterprise_wechat_cookies.txt"))
+        ),
     )
 
 

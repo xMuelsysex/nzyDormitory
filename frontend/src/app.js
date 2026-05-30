@@ -34,6 +34,10 @@ const ctx = canvas.getContext('2d');
 const roomForm = document.querySelector('#roomForm');
 const scheduleForm = document.querySelector('#scheduleForm');
 const alertForm = document.querySelector('#alertForm');
+const wechatSessionForm = document.querySelector('#wechatSessionForm');
+const wechatResetButton = document.querySelector('#wechatResetButton');
+const wechatGuideCopyButton = document.querySelector('#wechatGuideCopyButton');
+const wechatGuideUrl = document.querySelector('#wechatGuideUrl');
 const loginLink = document.querySelector('#loginLink');
 const runOnceButton = document.querySelector('#runOnceButton');
 const refreshButton = document.querySelector('#refreshButton');
@@ -69,9 +73,10 @@ function setMessage(id, message, isError = false) {
 
 function statusBadgeLabel(status) {
   if (status.authenticationStatus === 'session_expired') return '登录已过期，需重新登录';
-  if (!status.authenticated) return '等待校园门户登录';
-  if (!status.roomSelection) return '已登录，待绑定宿舍';
-  return `已登录 · ${status.roomSelection.building} ${status.roomSelection.room}`;
+  if (!status.authenticated) return '等待企业微信或校园门户登录';
+  const source = status.authenticationSource === 'enterprise_wechat' ? '企业微信' : '校园门户';
+  if (!status.roomSelection) return `${source} 已登录，待绑定宿舍`;
+  return `${source} 已登录 · ${status.roomSelection.building} ${status.roomSelection.room}`;
 }
 
 async function refreshStatus(options = {}) {
@@ -80,6 +85,7 @@ async function refreshStatus(options = {}) {
   statusBadge.textContent = statusBadgeLabel(status);
   if (applyConfig) applySavedConfig(status);
   updateLoginLink(status);
+  renderSourceState(status);
   updateControlStates(status);
   renderCollectionMessage(status);
 }
@@ -93,6 +99,21 @@ function updateLoginLink(status) {
   }
   loginLink.href = '/portal/login';
   loginLink.textContent = status.authenticated ? '重新进入校园门户登录' : '进入校园门户登录';
+}
+
+function renderSourceState(status) {
+  const wechat = status.sources?.enterpriseWechat;
+  if (!wechat) return;
+  if (wechat.authenticationStatus === 'session_expired') {
+    setMessage('#wechatMessage', '企业微信会话已过期，请重新导入 Cookie。', true);
+    return;
+  }
+  if (wechat.authenticated) {
+    setMessage('#wechatMessage', '企业微信会话已导入，采集会优先使用企业微信。');
+    return;
+  }
+  const currentMessage = document.querySelector('#wechatMessage')?.textContent || '';
+  if (!currentMessage.includes('导入') && !currentMessage.includes('失败')) setMessage('#wechatMessage', '');
 }
 
 function authenticationStatusLabel(status) {
@@ -185,12 +206,14 @@ function renderReadingsError(error) {
 function renderCollectionMessage(status) {
   const lastRun = status.lastCollectionRun;
   if (status.authenticationStatus === 'session_expired') {
-    collectionMessage.textContent = '校园门户登录已过期，请重新登录后再采集。';
+    collectionMessage.textContent = status.authenticationSource === 'enterprise_wechat'
+      ? '企业微信会话已过期，请重新导入后再采集。'
+      : '校园门户登录已过期，请重新登录后再采集。';
     collectionMessage.classList.add('error');
     return;
   }
   if (lastRun?.status === 'failed') {
-    collectionMessage.textContent = `最近采集失败：${collectionFailureMessage(lastRun)}。`;
+    collectionMessage.textContent = `最近采集失败：${collectionFailureMessage(lastRun, status)}。`;
     collectionMessage.classList.add('error');
     return;
   }
@@ -203,8 +226,12 @@ function renderCollectionMessage(status) {
   collectionMessage.classList.remove('error');
 }
 
-function collectionFailureMessage(run) {
-  if (run.errorCode === 'SESSION_EXPIRED') return '登录已失效，请重新登录校园门户';
+function collectionFailureMessage(run, status) {
+  if (run.errorCode === 'SESSION_EXPIRED') {
+    return status.authenticationSource === 'enterprise_wechat'
+      ? '企业微信会话已失效，请重新导入 Cookie'
+      : '校园门户登录已失效，请重新登录';
+  }
   if (run.message) return run.message;
   return '请检查登录状态或稍后重试';
 }
@@ -372,8 +399,8 @@ function updateControlStates(status) {
   runOnceButton.disabled = loginRequired || roomRequired;
   if (loginRequired) {
     const loginMessage = status.authenticationStatus === 'session_expired'
-      ? '校园门户登录已过期，请重新登录。'
-      : '请先完成校园门户登录。';
+      ? '登录状态已过期，请重新登录或导入企业微信会话。'
+      : '请先导入企业微信会话或完成校园门户登录。';
     setMessage('#roomMessage', loginMessage, true);
     setMessage('#scheduleMessage', status.authenticationStatus === 'session_expired' ? loginMessage : '登录并选择宿舍后才能配置定时采集。', true);
     setMessage('#alertMessage', status.authenticationStatus === 'session_expired' ? loginMessage : '登录后才能配置邮件提醒。', true);
@@ -382,6 +409,29 @@ function updateControlStates(status) {
   if (roomRequired) {
     setMessage('#roomMessage', '');
     setMessage('#scheduleMessage', '选择宿舍后才能配置定时采集。', true);
+  }
+}
+
+function validateWechatSessionPayload(payload) {
+  if (!String(payload.cookieHeader || '').trim()) {
+    throw new Error('请粘贴企业微信页面的 Cookie。');
+  }
+}
+
+function absoluteGuideUrl() {
+  return new URL('/wechat/guide', window.location.origin).toString();
+}
+
+async function copyWechatGuideUrl() {
+  const guideUrl = absoluteGuideUrl();
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(guideUrl);
+    return;
+  }
+  wechatGuideUrl.value = guideUrl;
+  wechatGuideUrl.select();
+  if (!document.execCommand?.('copy')) {
+    throw new Error('Copy command failed');
   }
 }
 
@@ -414,6 +464,45 @@ const loginMessage = document.querySelector('#loginMessage');
 if (loginMessage && new URLSearchParams(window.location.search).get('login') === 'success') {
   setMessage('#loginMessage', '校园门户登录成功，请继续选择宿舍。');
 }
+
+if (wechatGuideUrl) {
+  wechatGuideUrl.value = absoluteGuideUrl();
+}
+
+wechatGuideCopyButton.addEventListener('click', async () => {
+  try {
+    await copyWechatGuideUrl();
+    setMessage('#wechatGuideMessage', '向导链接已复制。');
+  } catch (error) {
+    setMessage('#wechatGuideMessage', '复制失败，请手动复制输入框中的链接。', true);
+  }
+});
+
+wechatSessionForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const payload = formData(event.currentTarget);
+    validateWechatSessionPayload(payload);
+    await api.post('/wechat/session/import', payload);
+    event.currentTarget.reset();
+    setMessage('#wechatMessage', '企业微信会话已导入。');
+    await refreshStatus();
+    readingsState.page = 1;
+    await refreshReadings();
+  } catch (error) {
+    setMessage('#wechatMessage', error.message, true);
+  }
+});
+
+wechatResetButton.addEventListener('click', async () => {
+  try {
+    await api.post('/wechat/session/reset', {});
+    setMessage('#wechatMessage', '企业微信会话已清除。');
+    await refreshStatus();
+  } catch (error) {
+    setMessage('#wechatMessage', error.message, true);
+  }
+});
 
 roomForm.addEventListener('submit', async (event) => {
   event.preventDefault();

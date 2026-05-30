@@ -25,9 +25,11 @@ APP_TIMEZONE=Asia/Shanghai
 DATA_DIR=./data
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+ENTERPRISE_WECHAT_ELECTRICITY_URL=http://wx.njucm.edu.cn/work/njucm/card.aspx?wid=37
 SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
 PERSIST_PORTAL_COOKIES=false
 PORTAL_COOKIE_PATH=./data/portal_cookies.txt
+ENTERPRISE_WECHAT_COOKIE_PATH=./data/enterprise_wechat_cookies.txt
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USERNAME=
@@ -40,6 +42,47 @@ SMTP settings are required only when email alerts are enabled.
 `SESSION_KEEP_ALIVE_INTERVAL_SECONDS` controls the independent campus portal keep-alive interval and defaults to 300 seconds. `PERSIST_PORTAL_COOKIES` is disabled by default; if set to `true`, the app stores the campus portal session cookie file at `PORTAL_COOKIE_PATH` with best-effort `0600` permissions so a trusted single-user deployment can survive restarts. The cookie file is a login credential, so enable this only on trusted hosts.
 
 `CAMPUS_LOGIN_URL` and `CAMPUS_ELECTRICITY_URL` default to the NJUCM WebVPN portal paths above. Override them only when the campus portal path changes or when deploying in an environment with a different reachable campus gateway.
+
+`ENTERPRISE_WECHAT_ELECTRICITY_URL` defaults to the NJUCM enterprise WeChat card workbench entry. After opening the school workbench in an authorized Enterprise WeChat session, import the `wx.njucm.edu.cn` Cookie in the app. HAR analysis confirmed the electricity page at `/work/njucm/s_card_selfhelp_elect.aspx`; collection now queries `/work/njucm/card.ashx?action=selfhelp_elect_query` with the imported session. When both enterprise WeChat and the campus portal are authenticated, collection prefers enterprise WeChat and keeps the campus portal as fallback.
+
+## Enterprise WeChat guide option
+
+The dashboard includes an enterprise WeChat guide link at `/wechat/guide`.
+
+1. Open the dashboard, copy the guide link, and send/open it in Windows Enterprise WeChat.
+2. On the guide page, click "打开学校电费页" to launch the configured `ENTERPRISE_WECHAT_ELECTRICITY_URL`.
+3. If the school page opens normally, use that authenticated session as the source for manual Cookie import or the helper tool.
+4. If the guide opens in a system browser, or the school page shows `messageerror.aspx`, export a HAR from the browser/capture tool and run the local diagnostic helper.
+
+The app cannot automatically read cookies from `wx.njucm.edu.cn` while serving `/wechat/guide`; browsers enforce same-origin isolation between the school domain and this app.
+
+### Enterprise WeChat HAR import helper
+
+For non-technical users, the shortest fallback is to export a HAR from the authenticated Enterprise WeChat traffic and import it locally. Keep the app running, then run:
+
+```bash
+python3 tools/import_wechat_har.py path/to/enterprise-wechat.har
+```
+
+The import helper uses only the Python standard library. It extracts the `ASP.NET_SessionId` cookie for `wx.njucm.edu.cn`, imports it through `/wechat/session/import`, and, when the HAR contains the electricity query request, saves the room selection through `/api/room-selection`. It does not print Cookie values.
+
+If the app is running on a different local port, pass the base URL explicitly:
+
+```bash
+python3 tools/import_wechat_har.py path/to/enterprise-wechat.har --base-url http://127.0.0.1:8123
+```
+
+Use `--dry-run` to check whether the HAR contains the needed cookie and room fields without importing anything. Raw HAR files contain login credentials; do not paste them into chat or commit them. The repository ignores `*.har` by default.
+
+### Enterprise WeChat HAR diagnostic fallback
+
+The diagnostic helper is offline and uses only the Python standard library. It prints a redacted report with matched enterprise WeChat paths, OAuth-like query key presence, Cookie/Set-Cookie names, User-Agent markers, candidate `.ashx`/`.aspx` endpoints, and likely electricity payload signals.
+
+```bash
+python3 tools/analyze_wechat_har.py path/to/enterprise-wechat.har
+```
+
+Review the generated report instead of sharing the raw HAR; it omits Cookie values, query values, OAuth codes, tokens, and response bodies.
 
 ## Docker deployment on Ubuntu
 
@@ -96,11 +139,13 @@ Create `.env` only for values that differ from the defaults or for SMTP alert se
 cat > .env <<'EOF'
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+ENTERPRISE_WECHAT_ELECTRICITY_URL=http://wx.njucm.edu.cn/work/njucm/card.aspx?wid=37
 
 # Optional session continuity settings
 SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
 PERSIST_PORTAL_COOKIES=false
 PORTAL_COOKIE_PATH=/app/data/portal_cookies.txt
+ENTERPRISE_WECHAT_COOKIE_PATH=/app/data/enterprise_wechat_cookies.txt
 
 # Optional email alert settings
 SMTP_HOST=

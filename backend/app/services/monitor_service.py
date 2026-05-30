@@ -16,14 +16,14 @@ class MonitorService:
 
     def save_room(self, payload: dict[str, object]) -> dict[str, object]:
         if not self.portal.authenticated:
-            raise AuthenticationError("Campus portal login is required before selecting a room.")
+            raise AuthenticationError("Enterprise WeChat session import or campus portal login is required before selecting a room.")
         selection = RoomSelection.from_payload(payload)
         self.repository.save_room_selection(selection, utc_now_iso())
         return {"roomSelection": room_to_payload(selection)}
 
     def save_schedule(self, payload: dict[str, object]) -> dict[str, object]:
         if not self.portal.authenticated:
-            raise AuthenticationError("Campus portal login is required before scheduling collection.")
+            raise AuthenticationError("Enterprise WeChat session import or campus portal login is required before scheduling collection.")
         if self.repository.get_room_selection() is None:
             raise ValidationError("Room selection is required before scheduling collection.")
         config = ScheduleConfig.from_payload(payload)
@@ -40,6 +40,8 @@ class MonitorService:
         return {
             "authenticated": self.portal.authenticated,
             "authenticationStatus": getattr(self.portal, "authentication_status", "authenticated" if self.portal.authenticated else "unauthenticated"),
+            "authenticationSource": getattr(self.portal, "active_source", "campus_portal"),
+            "sources": self.portal.status_by_source() if hasattr(self.portal, "status_by_source") else {},
             "roomSelection": room_to_payload(self.repository.get_room_selection()),
             "scheduleConfig": schedule_to_payload(self.repository.get_schedule_config()),
             "alertConfig": alert_to_payload(self.repository.get_alert_config()),

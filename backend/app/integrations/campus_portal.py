@@ -50,6 +50,10 @@ class CampusPortalClient:
         self.authentication_status = "unauthenticated"
         self._login_page_url = settings.campus_login_url
 
+    @property
+    def source_name(self) -> str:
+        return "campus_portal"
+
     def _new_cookie_jar(self) -> CookieJar:
         if self.settings.persist_portal_cookies:
             return MozillaCookieJar(str(self.settings.portal_cookie_path))

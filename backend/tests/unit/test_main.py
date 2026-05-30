@@ -3,7 +3,7 @@ import unittest
 from io import BytesIO
 from unittest.mock import Mock, patch
 
-from backend.app.main import DormElectricityHandler, FRONTEND_DIR, parse_readings_pagination
+from backend.app.main import DormElectricityHandler, FRONTEND_DIR, build_wechat_guide_html, parse_readings_pagination
 from backend.app.shared.errors import ValidationError
 from backend.app.shared.http import is_client_disconnect, read_json_body, send_error
 
@@ -52,6 +52,41 @@ class StaticFileTests(unittest.TestCase):
         send_json.assert_called_once_with(handler, 404, {'error': {'code': 'NOT_FOUND', 'message': 'Endpoint not found'}})
 
 
+class WechatGuideTests(unittest.TestCase):
+    def test_wechat_guide_route_serves_configured_link_and_fallback_copy(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/wechat/guide'
+        settings = type('Settings', (), {'enterprise_wechat_electricity_url': 'http://wx.test/card.aspx?wid=37'})()
+
+        with (
+            patch('backend.app.main.settings', settings),
+            patch('backend.app.main.send_html') as send_html,
+        ):
+            handler.do_GET()
+
+        html = send_html.call_args.args[2]
+        send_html.assert_called_once()
+        self.assertEqual(send_html.call_args.args[:2], (handler, 200))
+        self.assertIn('href="http://wx.test/card.aspx?wid=37"', html)
+        self.assertIn('Windows 企业微信', html)
+        self.assertIn('messageerror.aspx', html)
+        self.assertIn('手动 Cookie 导入或辅助工具', html)
+        self.assertIn('href="/"', html)
+
+    def test_wechat_guide_html_escapes_configured_url(self):
+        html = build_wechat_guide_html('http://wx.test/card.aspx?wid=37&next="bad"')
+
+        self.assertIn('href="http://wx.test/card.aspx?wid=37&amp;next=&quot;bad&quot;"', html)
+        self.assertNotIn('href="http://wx.test/card.aspx?wid=37&next="bad""', html)
+
+    def test_wechat_guide_html_rejects_unsafe_target_scheme(self):
+        html = build_wechat_guide_html('javascript:alert(1)')
+
+        self.assertIn('href="#" aria-disabled="true"', html)
+        self.assertIn('学校电费页配置无效', html)
+        self.assertNotIn('javascript:alert(1)', html)
+
+
 class PortalLoginFlowTests(unittest.TestCase):
     def test_reset_login_clears_session_before_loading_page(self):
         handler = DormElectricityHandler.__new__(DormElectricityHandler)
@@ -61,7 +96,7 @@ class PortalLoginFlowTests(unittest.TestCase):
         session_keeper = Mock()
 
         with (
-            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.campus_portal', portal),
             patch('backend.app.main.session_keeper', session_keeper),
             patch('backend.app.main.send_html') as send_html,
         ):
@@ -79,7 +114,7 @@ class PortalLoginFlowTests(unittest.TestCase):
         portal.load_login_page.return_value = '<form></form>'
 
         with (
-            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.campus_portal', portal),
             patch('backend.app.main.send_html'),
         ):
             handler.do_GET()
@@ -94,7 +129,7 @@ class PortalLoginFlowTests(unittest.TestCase):
         portal.submit_login_page.return_value = (True, '')
 
         with (
-            patch('backend.app.main.portal', portal),
+            patch('backend.app.main.campus_portal', portal),
             patch('backend.app.main.read_form_body', return_value={'UserName': 'student'}),
             patch('backend.app.main.handle_login_success') as handle_login_success,
             patch('backend.app.main.send_redirect') as send_redirect,
@@ -137,6 +172,62 @@ class PortalLoginFlowTests(unittest.TestCase):
 
         session_keeper.restart.assert_called_once_with()
         start_background_collection.assert_not_called()
+
+    def test_wechat_cookie_import_verifies_session_and_starts_recovery(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/wechat/session/import'
+        enterprise_wechat = Mock()
+
+        with (
+            patch('backend.app.main.enterprise_wechat', enterprise_wechat),
+            patch('backend.app.main.read_json_body', return_value={'cookieHeader': 'ASP.NET_SessionId=abc'}),
+            patch('backend.app.main.handle_login_success') as handle_login_success,
+            patch('backend.app.main.send_json') as send_json,
+        ):
+            handler.do_POST()
+
+        enterprise_wechat.import_cookies.assert_called_once_with('ASP.NET_SessionId=abc')
+        handle_login_success.assert_called_once_with(recover_if_room_selected=True)
+        send_json.assert_called_once_with(
+            handler,
+            200,
+            {'source': 'enterprise_wechat', 'authenticationStatus': 'authenticated'},
+        )
+
+    def test_wechat_cookie_import_requires_cookie_header(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/wechat/session/import'
+
+        with (
+            patch('backend.app.main.read_json_body', return_value={}),
+            patch('backend.app.main.send_error') as send_error,
+        ):
+            handler.do_POST()
+
+        error = send_error.call_args.args[1]
+        self.assertIsInstance(error, ValidationError)
+        self.assertEqual(error.message, 'cookieHeader is required.')
+
+    def test_wechat_session_reset_clears_only_wechat_session(self):
+        handler = DormElectricityHandler.__new__(DormElectricityHandler)
+        handler.path = '/wechat/session/reset'
+        enterprise_wechat = Mock()
+
+        with (
+            patch('backend.app.main.enterprise_wechat', enterprise_wechat),
+            patch('backend.app.main.read_json_body', return_value={}),
+            patch('backend.app.main.handle_wechat_session_reset') as handle_wechat_session_reset,
+            patch('backend.app.main.send_json') as send_json,
+        ):
+            handler.do_POST()
+
+        enterprise_wechat.reset_session.assert_called_once_with()
+        handle_wechat_session_reset.assert_called_once_with()
+        send_json.assert_called_once_with(
+            handler,
+            200,
+            {'source': 'enterprise_wechat', 'authenticationStatus': 'unauthenticated'},
+        )
 
 
 class ReadingsPaginationTests(unittest.TestCase):

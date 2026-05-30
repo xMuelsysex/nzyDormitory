@@ -18,6 +18,7 @@ def make_settings(temp_dir, smtp_host="smtp.test", smtp_from="monitor@test"):
         database_path=Path(temp_dir) / "test.sqlite3",
         campus_login_url="http://portal.test/Default.aspx",
         campus_electricity_url="http://portal.test/Web/Student/FeeElect.aspx",
+            enterprise_wechat_electricity_url="http://wx.test/work/njucm/card.aspx?wid=37",
         smtp_host=smtp_host,
         smtp_port=587,
         smtp_username="",

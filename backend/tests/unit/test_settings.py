@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfoNotFoundError
 from backend.app.config.settings import (
     DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL,
     DEFAULT_CAMPUS_WEBVPN_URL,
+    DEFAULT_ENTERPRISE_WECHAT_ELECTRICITY_URL,
     Settings,
     load_settings,
 )
@@ -21,6 +22,7 @@ class SettingsTests(unittest.TestCase):
             database_path=__import__('pathlib').Path('data/test.sqlite3'),
             campus_login_url='http://example.test/login',
             campus_electricity_url='http://example.test/electricity',
+            enterprise_wechat_electricity_url="http://wx.test/work/njucm/card.aspx?wid=37",
             smtp_host='',
             smtp_port=587,
             smtp_username='',
@@ -44,9 +46,11 @@ class SettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.campus_login_url, DEFAULT_CAMPUS_WEBVPN_URL)
         self.assertEqual(settings.campus_electricity_url, DEFAULT_CAMPUS_WEBVPN_ELECTRICITY_URL)
+        self.assertEqual(settings.enterprise_wechat_electricity_url, DEFAULT_ENTERPRISE_WECHAT_ELECTRICITY_URL)
         self.assertEqual(settings.session_keep_alive_interval_seconds, 300)
         self.assertFalse(settings.persist_portal_cookies)
         self.assertEqual(settings.portal_cookie_path, settings.data_dir / 'portal_cookies.txt')
+        self.assertEqual(settings.enterprise_wechat_cookie_path, settings.data_dir / 'enterprise_wechat_cookies.txt')
 
     def test_load_settings_preserves_campus_url_overrides(self):
         with patch.dict(
@@ -54,9 +58,11 @@ class SettingsTests(unittest.TestCase):
             {
                 'CAMPUS_LOGIN_URL': 'http://example.test/login',
                 'CAMPUS_ELECTRICITY_URL': 'http://example.test/electricity',
+                'ENTERPRISE_WECHAT_ELECTRICITY_URL': 'http://wx.example.test/work/card.aspx?wid=37',
                 'SESSION_KEEP_ALIVE_INTERVAL_SECONDS': '120',
                 'PERSIST_PORTAL_COOKIES': 'true',
                 'PORTAL_COOKIE_PATH': 'data/custom-cookies.txt',
+                'ENTERPRISE_WECHAT_COOKIE_PATH': 'data/custom-wechat-cookies.txt',
             },
             clear=True,
         ):
@@ -64,6 +70,8 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.campus_login_url, 'http://example.test/login')
         self.assertEqual(settings.campus_electricity_url, 'http://example.test/electricity')
+        self.assertEqual(settings.enterprise_wechat_electricity_url, 'http://wx.example.test/work/card.aspx?wid=37')
         self.assertEqual(settings.session_keep_alive_interval_seconds, 120)
         self.assertTrue(settings.persist_portal_cookies)
         self.assertEqual(str(settings.portal_cookie_path), 'data/custom-cookies.txt')
+        self.assertEqual(str(settings.enterprise_wechat_cookie_path), 'data/custom-wechat-cookies.txt')

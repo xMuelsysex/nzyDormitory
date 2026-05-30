@@ -66,7 +66,8 @@ class Repository:
                     building TEXT NOT NULL,
                     room TEXT NOT NULL,
                     numeric_value REAL NOT NULL,
-                    unit TEXT NOT NULL
+                    unit TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'campus_portal'
                 );
                 CREATE TABLE IF NOT EXISTS collection_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,8 +153,8 @@ class Repository:
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO electricity_readings
-                (room_id, collection_run_id, collection_window_start, collected_at, building, room, numeric_value, unit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (room_id, collection_run_id, collection_window_start, collected_at, building, room, numeric_value, unit, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     room_id,
@@ -164,6 +165,7 @@ class Repository:
                     reading.room,
                     reading.numeric_value,
                     reading.unit,
+                    reading.source,
                 ),
             )
             inserted = cursor.rowcount == 1
@@ -185,7 +187,7 @@ class Repository:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit
+                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit, er.source
                 FROM electricity_readings er
                 LEFT JOIN collection_runs cr ON cr.id = er.collection_run_id
                 WHERE cr.id IS NULL OR cr.status = 'success'
@@ -199,7 +201,7 @@ class Repository:
         with self.connect() as conn:
             row = conn.execute(
                 """
-                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit
+                SELECT er.collected_at, er.building, er.room, er.numeric_value, er.unit, er.source
                 FROM electricity_readings er
                 LEFT JOIN collection_runs cr ON cr.id = er.collection_run_id
                 WHERE cr.id IS NULL OR cr.status = 'success'
@@ -350,6 +352,8 @@ class Repository:
             conn.execute("ALTER TABLE electricity_readings ADD COLUMN collection_run_id INTEGER REFERENCES collection_runs(id)")
         if "collection_window_start" not in reading_columns:
             conn.execute("ALTER TABLE electricity_readings ADD COLUMN collection_window_start TEXT")
+        if "source" not in reading_columns:
+            conn.execute("ALTER TABLE electricity_readings ADD COLUMN source TEXT NOT NULL DEFAULT 'campus_portal'")
         alert_state_columns = self._table_columns(conn, "alert_state")
         if "last_session_expired_alert_sent_at" not in alert_state_columns:
             conn.execute("ALTER TABLE alert_state ADD COLUMN last_session_expired_alert_sent_at TEXT")
@@ -396,4 +400,5 @@ class Repository:
             "room": row["room"],
             "numericValue": row["numeric_value"],
             "unit": row["unit"],
+            "source": row["source"],
         }

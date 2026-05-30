@@ -14,6 +14,7 @@ class FakePortal:
     def __init__(self):
         self.authenticated = True
         self.authentication_status = "authenticated"
+        self.active_source = "campus_portal"
         self.reading = ElectricityReading(
             collected_at="2026-05-13T00:00:00Z",
             building="C20",
@@ -115,6 +116,32 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
         self.assertEqual(failures[0]["error_code"], "SESSION_EXPIRED")
         self.assertEqual([timer.interval for timer in FakeTimer.created], [3600])
         self.assertTrue(FakeTimer.created[0].started)
+
+    def test_scheduled_collection_skips_when_session_already_expired(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
+
+        with patch("backend.app.scheduler.collection_scheduler.threading.Timer", FakeTimer):
+            self.scheduler._run_and_reschedule()
+
+        self.assertEqual(self._failures(), [])
+        self.assertEqual(self.repository.list_collection_runs(), [])
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [3600])
+
+    def test_expired_enterprise_wechat_session_records_source_specific_message(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
+        self.portal.active_source = "enterprise_wechat"
+
+        with self.assertRaises(SessionExpiredError):
+            self.scheduler.run_once()
+
+        runs = self.repository.list_collection_runs()
+        self.assertEqual(runs[0]["errorCode"], "SESSION_EXPIRED")
+        self.assertEqual(
+            runs[0]["message"],
+            "Enterprise WeChat session expired. Please import a fresh session cookie.",
+        )
 
     def test_relogin_after_expiry_allows_collection_without_rescheduling(self):
         self.portal.authenticated = False

@@ -24,8 +24,30 @@
         <section class="config-grid" aria-label="值守配置">
           <div class="card card-auth">
             <p class="card-kicker">入口</p>
-            <h2>校园门户</h2>
-            <p class="hint">进入门户完成鉴权，回来后继续配置宿舍。</p>
+            <h2>企业微信</h2>
+            <p class="hint">在企业微信中打开电费页后导入当前会话，系统会优先使用企业微信采集。</p>
+            <div class="guide-entry">
+              <h3>企业微信内打开向导</h3>
+              <p class="hint">复制向导链接发送到 Windows 企业微信，或直接打开测试学校电费入口。</p>
+              <div class="button-row">
+                <a id="wechatGuideOpenLink" class="button-link" href="/wechat/guide" target="_blank" rel="noreferrer">打开向导</a>
+                <button id="wechatGuideCopyButton" type="button" class="secondary">复制向导链接</button>
+              </div>
+              <label class="guide-link-label">向导链接<input id="wechatGuideUrl" type="text" readonly value="/wechat/guide" /></label>
+              <p id="wechatGuideMessage" class="message"></p>
+              <p class="hint">如果向导被企业微信丢到系统浏览器，或学校页仍显示 messageerror.aspx，请导出 HAR 后运行本地诊断工具。</p>
+            </div>
+            <p class="hint diagnostic-note">若向导被系统浏览器打开，或学校页停在 <code>messageerror.aspx</code>，导出 HAR 后运行 <code>python3 tools/analyze_wechat_har.py capture.har</code>。</p>
+            <form id="wechatSessionForm" class="session-form">
+              <label>企业微信 Cookie<textarea name="cookieHeader" rows="3" placeholder="ASP.NET_SessionId=...; ..."></textarea></label>
+              <div class="button-row">
+                <button type="submit">导入企业微信会话</button>
+                <button id="wechatResetButton" type="button" class="secondary">清除企业微信会话</button>
+              </div>
+            </form>
+            <p id="wechatMessage" class="message"></p>
+            <h3>校园门户备用</h3>
+            <p class="hint">企业微信不可用时，可继续进入校园门户完成备用鉴权。</p>
             <a id="loginLink" class="button-link" href="/portal/login">进入校园门户登录</a>
             <p id="loginMessage" class="message"></p>
           </div>

@@ -11,6 +11,7 @@ from backend.app.shared.errors import PortalFetchError, SessionExpiredError
 class FakePortal:
     def __init__(self):
         self.authenticated = True
+        self.authentication_status = "authenticated"
         self.keep_alive_calls = 0
         self.expire_next = False
         self.fail_next = False
@@ -19,9 +20,12 @@ class FakePortal:
         self.keep_alive_calls += 1
         if self.expire_next:
             self.authenticated = False
+            self.authentication_status = "session_expired"
             raise SessionExpiredError("Campus portal session expired. Please log in again.")
         if self.fail_next:
             raise PortalFetchError("Campus portal keep-alive failed.")
+        self.authenticated = True
+        self.authentication_status = "authenticated"
 
 
 class FakeAlerts:
@@ -69,15 +73,25 @@ class SessionKeeperTests(unittest.TestCase):
         self.assertEqual([timer.interval for timer in FakeTimer.created], [300])
         self.assertTrue(FakeTimer.created[0].started)
 
-    def test_restart_does_not_schedule_when_unauthenticated(self):
+    def test_restart_does_not_schedule_when_never_authenticated(self):
         self.portal.authenticated = False
+        self.portal.authentication_status = "unauthenticated"
 
         with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
             self.keeper.restart()
 
         self.assertEqual(FakeTimer.created, [])
 
-    def test_expired_session_records_failure_notifies_and_stops(self):
+    def test_restart_schedules_probe_when_session_is_expired(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
+
+        with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
+            self.keeper.restart()
+
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [300])
+
+    def test_expired_session_records_failure_notifies_and_reschedules(self):
         self.portal.expire_next = True
 
         with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
@@ -87,7 +101,46 @@ class SessionKeeperTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertEqual(failures[0]["error_code"], "SESSION_EXPIRED")
         self.assertEqual(len(self.alerts.notifications), 1)
-        self.assertEqual(FakeTimer.created, [])
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [300])
+
+    def test_already_expired_session_reschedules_without_repeated_failure(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
+
+        with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
+            self.keeper._run_and_reschedule()
+
+        self.assertEqual(self.portal.keep_alive_calls, 0)
+        self.assertEqual(self._failures(), [])
+        self.assertEqual(self.alerts.notifications, [])
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [300])
+
+    def test_relogin_after_expiry_allows_keep_alive_to_recover(self):
+        self.portal.authenticated = False
+        self.portal.authentication_status = "session_expired"
+
+        with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
+            self.keeper._run_and_reschedule()
+            self.portal.authenticated = True
+            self.portal.authentication_status = "authenticated"
+            FakeTimer.created[-1].callback()
+
+        self.assertEqual(self.portal.keep_alive_calls, 1)
+        self.assertTrue(self.portal.authenticated)
+        self.assertEqual(self.portal.authentication_status, "authenticated")
+        self.assertEqual(self._failures(), [])
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [300, 300])
+
+    def test_stop_prevents_inflight_callback_from_rescheduling(self):
+        with patch("backend.app.scheduler.session_keeper.threading.Timer", FakeTimer):
+            self.keeper.restart()
+            first_timer = FakeTimer.created[-1]
+            self.keeper.stop()
+            first_timer.callback()
+
+        self.assertEqual(self.portal.keep_alive_calls, 1)
+        self.assertEqual([timer.interval for timer in FakeTimer.created], [300])
+        self.assertFalse(first_timer.started)
 
     def test_portal_fetch_error_records_failure_and_reschedules_if_still_authenticated(self):
         self.portal.fail_next = True

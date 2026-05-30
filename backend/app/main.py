@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -10,6 +11,8 @@ import threading
 from backend.app.alerts.email_alerts import EmailAlertService
 from backend.app.config.settings import load_settings
 from backend.app.integrations.campus_portal import CampusPortalClient
+from backend.app.integrations.enterprise_wechat import EnterpriseWechatClient
+from backend.app.integrations.source_router import ElectricitySourceRouter
 from backend.app.persistence.repository import Repository
 from backend.app.scheduler.collection_scheduler import CollectionScheduler
 from backend.app.scheduler.session_keeper import SessionKeeper
@@ -22,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 settings = load_settings()
 repository = Repository(settings.database_path)
-portal = CampusPortalClient(settings)
+campus_portal = CampusPortalClient(settings)
+enterprise_wechat = EnterpriseWechatClient(settings)
+portal = ElectricitySourceRouter(enterprise_wechat, campus_portal)
 alert_service = EmailAlertService(settings, repository)
 scheduler = CollectionScheduler(repository, portal, alert_service, settings.zoneinfo)
 session_keeper = SessionKeeper(portal, repository, alert_service, settings.session_keep_alive_interval_seconds)
@@ -41,17 +46,19 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
             elif path == "/api/readings":
                 page, page_size = parse_readings_pagination(parsed_url.query)
                 send_json(self, 200, service.readings(page, page_size))
+            elif path == "/wechat/guide":
+                send_html(self, 200, build_wechat_guide_html(settings.enterprise_wechat_electricity_url))
             elif path == "/portal/login":
                 params = parse_qs(parsed_url.query, keep_blank_values=True)
                 if params.get("reset", [""])[-1] == "1":
                     session_keeper.stop()
-                    portal.reset_session()
-                send_html(self, 200, portal.load_login_page())
+                    campus_portal.reset_session()
+                send_html(self, 200, campus_portal.load_login_page())
             elif path == "/portal/proxy":
-                body, content_type = portal.fetch_proxy_resource(self.path)
+                body, content_type = campus_portal.fetch_proxy_resource(self.path)
                 send_bytes(self, 200, body, content_type)
             elif path.startswith("/portal/"):
-                body, content_type = portal.fetch_portal_path(self.path)
+                body, content_type = campus_portal.fetch_portal_path(self.path)
                 send_bytes(self, 200, body, content_type)
             else:
                 self._serve_static(path)
@@ -62,7 +69,7 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             if path == "/portal/login":
-                success, html_body = portal.submit_login_page(read_form_body(self))
+                success, html_body = campus_portal.submit_login_page(read_form_body(self))
                 if success:
                     handle_login_success(recover_if_room_selected=True)
                     send_redirect(self, "/?login=success")
@@ -70,6 +77,16 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
                     send_html(self, 200, html_body)
                 return
             payload = read_json_body(self)
+            if path == "/wechat/session/import":
+                enterprise_wechat.import_cookies(_required_string(payload, "cookieHeader"))
+                handle_login_success(recover_if_room_selected=True)
+                send_json(self, 200, {"source": "enterprise_wechat", "authenticationStatus": "authenticated"})
+                return
+            elif path == "/wechat/session/reset":
+                enterprise_wechat.reset_session()
+                handle_wechat_session_reset()
+                send_json(self, 200, {"source": "enterprise_wechat", "authenticationStatus": "unauthenticated"})
+                return
             if path == "/api/room-selection":
                 send_json(self, 200, service.save_room(payload))
             elif path == "/api/schedule-config":
@@ -124,6 +141,113 @@ def _positive_query_int(params: dict[str, list[str]], name: str, default: int) -
     return parsed
 
 
+def _required_string(payload: dict[str, object], field: str) -> str:
+    value = str(payload.get(field, "")).strip()
+    if not value:
+        raise ValidationError(f"{field} is required.")
+    return value
+
+
+def build_wechat_guide_html(electricity_url: str) -> str:
+    safe_url = _safe_guide_target_url(electricity_url)
+    guide_link_attrs = f'href="{safe_url}"'
+    guide_link_text = "打开学校电费页"
+    if safe_url == "#":
+        guide_link_attrs = 'href="#" aria-disabled="true"'
+        guide_link_text = "学校电费页配置无效"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>企业微信电费入口向导</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #f5f1e8;
+        color: #26281f;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{ margin: 0; min-height: 100vh; background: #f5f1e8; }}
+      main {{
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 24px 18px 40px;
+      }}
+      .panel {{
+        border: 1px solid rgba(76, 72, 58, .22);
+        border-left: 5px solid #385342;
+        border-radius: 16px;
+        background: #fffaf0;
+        padding: 18px;
+        box-shadow: 0 12px 28px rgba(49, 44, 31, .10);
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: 28px;
+        line-height: 1.2;
+      }}
+      p, li {{ line-height: 1.7; }}
+      .hint {{ color: #746f60; }}
+      .actions {{
+        display: grid;
+        gap: 10px;
+        margin: 18px 0;
+      }}
+      a {{
+        color: #385342;
+        font-weight: 800;
+      }}
+      .button {{
+        display: block;
+        width: 100%;
+        min-height: 46px;
+        border-radius: 10px;
+        padding: 12px 14px;
+        border: 1px solid #385342;
+        background: #385342;
+        color: #f9f5e8;
+        text-align: center;
+        text-decoration: none;
+      }}
+      .button.secondary {{
+        border-color: rgba(76, 72, 58, .34);
+        background: #f7f0df;
+        color: #385342;
+      }}
+      code {{
+        padding: 2px 5px;
+        border-radius: 6px;
+        background: #f7f0df;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <h1>企业微信电费入口向导</h1>
+        <p>请在 Windows 企业微信里打开本页，然后点击下面按钮打开学校电费页。</p>
+        <div class="actions">
+          <a class="button" {guide_link_attrs}>{guide_link_text}</a>
+          <a class="button secondary" href="/">返回值守台</a>
+        </div>
+        <p class="hint">如果学校页面显示 <code>messageerror.aspx</code>，说明学校入口或企业微信授权没有通过。</p>
+        <p class="hint">本应用不能自动读取 <code>wx.njucm.edu.cn</code> 的 Cookie；后续请回到值守台使用手动 Cookie 导入或辅助工具。</p>
+      </section>
+    </main>
+  </body>
+</html>"""
+
+
+def _safe_guide_target_url(electricity_url: str) -> str:
+    parsed = urlparse(electricity_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "#"
+    return escape(electricity_url, quote=True)
+
+
 def handle_login_success(*, recover_if_room_selected: bool) -> None:
     session_keeper.restart()
     scheduler.restart()
@@ -135,6 +259,12 @@ def handle_session_restored_from_cookie(*, recover_if_schedule_enabled: bool) ->
     session_keeper.restart()
     if recover_if_schedule_enabled and _schedule_enabled() and repository.get_room_selection() is not None:
         start_background_collection()
+
+
+def handle_wechat_session_reset() -> None:
+    if not portal.authenticated:
+        session_keeper.stop()
+        scheduler.restart()
 
 
 def start_background_collection() -> None:
@@ -150,7 +280,12 @@ def _run_background_collection() -> None:
 
 
 def initialize_portal_session() -> None:
-    if settings.persist_portal_cookies and portal.verify_persisted_session():
+    restored = False
+    if settings.persist_portal_cookies and enterprise_wechat.verify_persisted_session():
+        restored = True
+    if settings.persist_portal_cookies and campus_portal.verify_persisted_session():
+        restored = True
+    if restored:
         handle_session_restored_from_cookie(recover_if_schedule_enabled=True)
     elif settings.persist_portal_cookies and portal.authentication_status == "session_expired":
         alert_service.notify_session_expired(utc_now_iso())

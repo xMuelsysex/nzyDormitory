@@ -246,6 +246,44 @@ textarea:focus {
 
 textarea { resize: vertical; }
 
+.guide-entry {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.guide-entry .button-row {
+  align-items: stretch;
+}
+
+.guide-link-label {
+  margin-top: 10px;
+}
+
+.guide-link-label input {
+  min-height: 38px;
+  font-size: 12px;
+}
+
+.diagnostic-note code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.session-form textarea {
+  min-height: 78px;
+  font-size: 12px;
+}
+
+.card-auth h3 {
+  margin: 14px 0 8px;
+  font-family: var(--font-heading);
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
 button,
 .button-link {
   display: inline-block;
