@@ -54,20 +54,23 @@ class BrokenPortal(FakePortal):
 class FakeAlerts:
     def __init__(self):
         self.evaluations = 0
+        self.evaluation_profile_ids = []
         self.session_expired_notifications = []
 
-    def evaluate(self, reading):
+    def evaluate(self, reading, profile_id=None):
         self.evaluations += 1
+        self.evaluation_profile_ids.append(profile_id)
         return False
 
-    def notify_session_expired(self, occurred_at):
-        self.session_expired_notifications.append(occurred_at)
+    def notify_session_expired(self, occurred_at, profile_id=None):
+        self.session_expired_notifications.append((occurred_at, profile_id))
         return True
 
 
 class BrokenAlerts(FakeAlerts):
-    def evaluate(self, reading):
+    def evaluate(self, reading, profile_id=None):
         self.evaluations += 1
+        self.evaluation_profile_ids.append(profile_id)
         raise EmailDeliveryError("SMTP settings are not configured.")
 
 
@@ -320,6 +323,26 @@ class CollectionSchedulerSessionExpiryTests(unittest.TestCase):
 
         self.assertEqual([timer.interval for timer in FakeTimer.created], [0])
         self.assertTrue(FakeTimer.created[0].started)
+
+    def test_due_profile_collection_runs_each_enabled_profile(self):
+        default_profile = self.repository.get_default_profile()
+        second_profile = self.repository.get_or_create_profile("device-b", "2026-06-26T00:00:00Z")
+        self.repository.save_room_selection(
+            RoomSelection(building="C21", room="1234"),
+            "2026-06-26T00:00:00Z",
+            profile_id=second_profile.id,
+        )
+        self.repository.save_schedule_config(
+            ScheduleConfig(interval_seconds=3600, start_time="00:00", end_time="23:59", enabled=True),
+            "2026-06-26T00:00:00Z",
+            profile_id=second_profile.id,
+        )
+
+        self.scheduler.run_due_profiles()
+
+        self.assertEqual(len(self.repository.list_collection_runs(profile_id=default_profile.id)), 1)
+        self.assertEqual(len(self.repository.list_collection_runs(profile_id=second_profile.id)), 1)
+        self.assertEqual(self.alerts.evaluation_profile_ids, [default_profile.id, second_profile.id])
 
     def test_session_expiry_notifies_alert_service(self):
         self.portal.authenticated = False

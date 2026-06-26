@@ -16,6 +16,12 @@ python -m backend.app.main
 
 在浏览器中打开 `http://127.0.0.1:8000`。
 
+## 多设备行为
+
+每个浏览器会把稳定的设备 ID 保存在 `localStorage`。宿舍选择、定时设置、邮件提醒设置、提醒冷却状态、采集记录和历史读数都会按当前浏览器/设备隔离，因此两台电脑可以在同一个部署实例里监控不同宿舍。
+
+当前版本的企业微信和校园门户认证仍是一个共享的后端会话。共享会话过期后，受影响设备的定时采集会暂停，直到重新导入企业微信 Cookie 或重新登录校园门户。清空浏览器存储会生成新的设备 profile；旧 profile 会继续保留在 SQLite 数据库中。
+
 ## 环境变量
 
 ```text
@@ -25,9 +31,11 @@ APP_TIMEZONE=Asia/Shanghai
 DATA_DIR=./data
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+ENTERPRISE_WECHAT_ELECTRICITY_URL=http://wx.njucm.edu.cn/work/njucm/card.aspx?wid=37
 SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
 PERSIST_PORTAL_COOKIES=false
 PORTAL_COOKIE_PATH=./data/portal_cookies.txt
+ENTERPRISE_WECHAT_COOKIE_PATH=./data/enterprise_wechat_cookies.txt
 SMTP_HOST=
 SMTP_PORT=587
 SMTP_USERNAME=
@@ -40,6 +48,8 @@ SMTP_FROM=
 `SESSION_KEEP_ALIVE_INTERVAL_SECONDS` 控制独立校园门户保活间隔，默认 300 秒。`PERSIST_PORTAL_COOKIES` 默认关闭；设置为 `true` 时，应用会把校园门户会话 Cookie 保存到 `PORTAL_COOKIE_PATH`，并尽量设置 `0600` 文件权限，便于可信单用户部署在服务重启后继续使用原会话。Cookie 文件等同登录凭证，只应在可信主机上开启。
 
 `CAMPUS_LOGIN_URL` 和 `CAMPUS_ELECTRICITY_URL` 默认使用上面的 NJUCM WebVPN 门户路径。仅在校园门户路径变化，或部署环境需要使用其他可访问的校园网关时覆盖它们。
+
+`ENTERPRISE_WECHAT_ELECTRICITY_URL` 默认使用 NJUCM 企业微信一卡通入口。当前采集直接调用企业微信电费查询接口 `/work/njucm/card.ashx?action=selfhelp_elect_query`；学校旧页面 `/work/njucm/s_card_selfhelp_elect.aspx` 返回 404 时，不再阻断采集。
 
 ## Ubuntu 上的 Docker 部署
 
@@ -96,11 +106,13 @@ cd nzyDormitory
 cat > .env <<'EOF'
 CAMPUS_LOGIN_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Default.aspx
 CAMPUS_ELECTRICITY_URL=https://webvpn.njucm.edu.cn/http/webvpn34f6d2940beaaa8a549e2c772ae7c064/Web/Student/FeeElect.aspx
+ENTERPRISE_WECHAT_ELECTRICITY_URL=http://wx.njucm.edu.cn/work/njucm/card.aspx?wid=37
 
 # 可选会话连续性设置
 SESSION_KEEP_ALIVE_INTERVAL_SECONDS=300
 PERSIST_PORTAL_COOKIES=false
 PORTAL_COOKIE_PATH=/app/data/portal_cookies.txt
+ENTERPRISE_WECHAT_COOKIE_PATH=/app/data/enterprise_wechat_cookies.txt
 
 # 可选邮件提醒设置
 SMTP_HOST=
@@ -155,4 +167,5 @@ docker compose logs --tail=100 dorm-electricity
 - `docker compose ps` 显示容器正在反复重启：运行 `docker compose logs -f dorm-electricity` 并检查环境变量值。
 - 浏览器无法访问应用：确认 `docker compose ps` 显示端口映射为 `0.0.0.0:8000->8000/tcp`，然后检查防火墙和云服务安全组规则。
 - 登录页面或电费查询失败：确认服务器可以访问 `CAMPUS_LOGIN_URL` 和 `CAMPUS_ELECTRICITY_URL` 中配置的 WebVPN URL。
+- 企业微信采集报 `Enterprise WeChat portal is unavailable.`：确认服务器可以访问 `ENTERPRISE_WECHAT_ELECTRICITY_URL` 所在域名，以及 `/work/njucm/card.ashx?action=selfhelp_elect_query` 查询接口。
 - 邮件提醒无法发送：设置 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD` 和 `SMTP_FROM`，然后使用 `docker compose up -d` 重启。

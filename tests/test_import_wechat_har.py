@@ -134,7 +134,7 @@ class ImportWechatHarTests(unittest.TestCase):
             }
         )
 
-        summary = import_to_app(data, base_url="http://127.0.0.1:8123", urlopen_func=fake_urlopen, timeout=3)
+        summary = import_to_app(data, base_url="http://127.0.0.1:8123", device_id="device-test", urlopen_func=fake_urlopen, timeout=3)
         report = render_report(data, summary)
 
         self.assertTrue(summary.session_imported)
@@ -142,7 +142,7 @@ class ImportWechatHarTests(unittest.TestCase):
         self.assertEqual(requests[0][0], "http://127.0.0.1:8123/wechat/session/import")
         self.assertEqual(requests[0][1], {"cookieHeader": "ASP.NET_SessionId=COOKIE_SECRET"})
         self.assertEqual(requests[1][0], "http://127.0.0.1:8123/api/room-selection")
-        self.assertEqual(requests[1][1], {"building": "C20", "room": "2324"})
+        self.assertEqual(requests[1][1], {"building": "C20", "room": "2324", "deviceId": "device-test"})
         self.assertNotIn("COOKIE_SECRET", report)
 
     def test_ignores_non_target_hosts(self):

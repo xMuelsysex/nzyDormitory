@@ -1,17 +1,44 @@
+const DEVICE_ID_STORAGE_KEY = 'dormElectricity.deviceId';
+
 const api = {
   async get(path) {
-    const response = await fetch(path);
+    const response = await fetch(withDeviceIdQuery(path));
     return parseResponse(response);
   },
   async post(path, payload) {
     const response = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(withDeviceIdPayload(path, payload)),
     });
     return parseResponse(response);
   },
 };
+
+function withDeviceIdQuery(path) {
+  if (!isProfileScopedPath(path)) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set('deviceId', getDeviceId());
+  return `${url.pathname}${url.search}`;
+}
+
+function withDeviceIdPayload(path, payload) {
+  if (!isProfileScopedPath(path)) return payload;
+  return { ...payload, deviceId: getDeviceId() };
+}
+
+function isProfileScopedPath(path) {
+  return path.startsWith('/api/');
+}
+
+function getDeviceId() {
+  const stored = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  if (stored) return stored;
+  const randomId = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const deviceId = `device-${randomId}`;
+  localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+  return deviceId;
+}
 
 async function parseResponse(response) {
   const data = await response.json();
@@ -167,7 +194,7 @@ function renderReadingsView() {
   renderChart(readingsState.items);
   readingsMessage.classList.remove('error');
   readingsMessage.textContent = hasReadings
-    ? `共 ${readingsState.total} 条记录，当前显示第 ${readingsState.page} 页。`
+    ? `本设备共 ${readingsState.total} 条记录，当前显示第 ${readingsState.page} 页。`
     : emptyReadingsMessage();
   pageInfo.textContent = readingsState.total > 0
     ? `第 ${readingsState.page} / ${totalPages} 页`
@@ -355,7 +382,7 @@ function nonNegativeInteger(value, fallback) {
 function emptyReadingsMessage() {
   return readingsState.total > 0
     ? '当前页暂无数据。'
-    : '暂无历史数据，定时采集成功后会显示记录。';
+    : '本设备暂无历史数据，手动或定时采集成功后会显示记录。';
 }
 
 function drawChartMessage(message) {

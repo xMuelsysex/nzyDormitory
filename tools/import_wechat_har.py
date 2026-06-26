@@ -23,6 +23,7 @@ SESSION_COOKIE_NAME = "ASP.NET_SessionId"
 SELFHELP_QUERY_ENDPOINT = "/work/njucm/card.ashx"
 SELFHELP_QUERY_ACTION = "selfhelp_elect_query"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+DEFAULT_DEVICE_ID = "default"
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def import_to_app(
     import_data: WechatHarImportData,
     *,
     base_url: str = DEFAULT_BASE_URL,
+    device_id: str = DEFAULT_DEVICE_ID,
     urlopen_func: Urlopen = urlopen,
     timeout: float = 10.0,
 ) -> ImportSummary:
@@ -96,7 +98,7 @@ def import_to_app(
         _post_json(
             base_url,
             "/api/room-selection",
-            room_payload,
+            {**room_payload, "deviceId": device_id},
             urlopen_func=urlopen_func,
             timeout=timeout,
         )
@@ -262,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Import Enterprise WeChat auth from an exported HAR.")
     parser.add_argument("har_file", type=Path, help="Path to the exported HAR file.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Local app base URL. Default: {DEFAULT_BASE_URL}")
+    parser.add_argument("--device-id", default=DEFAULT_DEVICE_ID, help=f"Device profile id for imported room selection. Default: {DEFAULT_DEVICE_ID}")
     parser.add_argument("--dry-run", action="store_true", help="Parse the HAR and print the redacted report without importing.")
     args = parser.parse_args(argv)
 
@@ -270,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_report(import_data))
         return 0 if import_data.cookie_found else 2
     try:
-        summary = import_to_app(import_data, base_url=args.base_url)
+        summary = import_to_app(import_data, base_url=args.base_url, device_id=args.device_id)
     except (RuntimeError, ValueError) as exc:
         print(render_report(import_data), file=sys.stderr)
         print(f"Import failed: {exc}", file=sys.stderr)

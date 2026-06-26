@@ -16,6 +16,12 @@ python -m backend.app.main
 
 Open `http://127.0.0.1:8000` in a browser.
 
+## Multi-device behavior
+
+Each browser stores a stable device id in `localStorage`. Room selection, schedule settings, email alert settings, alert cooldown state, collection runs, and history readings are scoped to that browser/device, so two computers can monitor different dorm rooms from the same deployed app.
+
+Enterprise WeChat and campus portal authentication remain one shared backend session in this version. If the shared session expires, affected device schedules pause until the session is refreshed. Clearing browser storage creates a new device profile; the old profile remains in the SQLite database.
+
 ## Environment variables
 
 ```text
@@ -43,7 +49,7 @@ SMTP settings are required only when email alerts are enabled.
 
 `CAMPUS_LOGIN_URL` and `CAMPUS_ELECTRICITY_URL` default to the NJUCM WebVPN portal paths above. Override them only when the campus portal path changes or when deploying in an environment with a different reachable campus gateway.
 
-`ENTERPRISE_WECHAT_ELECTRICITY_URL` defaults to the NJUCM enterprise WeChat card workbench entry. After opening the school workbench in an authorized Enterprise WeChat session, import the `wx.njucm.edu.cn` Cookie in the app. HAR analysis confirmed the electricity page at `/work/njucm/s_card_selfhelp_elect.aspx`; collection now queries `/work/njucm/card.ashx?action=selfhelp_elect_query` with the imported session. When both enterprise WeChat and the campus portal are authenticated, collection prefers enterprise WeChat and keeps the campus portal as fallback.
+`ENTERPRISE_WECHAT_ELECTRICITY_URL` defaults to the NJUCM enterprise WeChat card workbench entry. After opening the school workbench in an authorized Enterprise WeChat session, import the `wx.njucm.edu.cn` Cookie in the app. Collection uses `/work/njucm/card.ashx?action=selfhelp_elect_query` as the electricity query contract; the legacy `/work/njucm/s_card_selfhelp_elect.aspx` page may return 404 and is no longer required before collection. When both enterprise WeChat and the campus portal are authenticated, collection prefers enterprise WeChat and keeps the campus portal as fallback.
 
 ## Enterprise WeChat guide option
 
@@ -64,7 +70,7 @@ For non-technical users, the shortest fallback is to export a HAR from the authe
 python3 tools/import_wechat_har.py path/to/enterprise-wechat.har
 ```
 
-The import helper uses only the Python standard library. It extracts the `ASP.NET_SessionId` cookie for `wx.njucm.edu.cn`, imports it through `/wechat/session/import`, and, when the HAR contains the electricity query request, saves the room selection through `/api/room-selection`. It does not print Cookie values.
+The import helper uses only the Python standard library. It extracts the `ASP.NET_SessionId` cookie for `wx.njucm.edu.cn`, imports it through `/wechat/session/import`, and, when the HAR contains the electricity query request, saves the room selection through `/api/room-selection`. The room import uses the `default` device profile unless `--device-id` is provided. It does not print Cookie values.
 
 If the app is running on a different local port, pass the base URL explicitly:
 
@@ -96,7 +102,7 @@ Run one check only:
 python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --once
 ```
 
-If the HAR has no room query, provide the room explicitly or use session-page keep-alive only:
+If the HAR has no room query, provide the room explicitly or use query-endpoint keep-alive only:
 
 ```bash
 python3 tools/probe_wechat_cookie_lifetime.py path/to/enterprise-wechat.har --building C20 --room 2324
@@ -231,4 +237,5 @@ The existing `dorm-electricity-data` volume is reused after the rebuild.
 - `docker compose ps` shows the container restarting: run `docker compose logs -f dorm-electricity` and check environment values.
 - Browser cannot reach the app: confirm `docker compose ps` maps `0.0.0.0:8000->8000/tcp`, then check firewall and cloud security group rules.
 - Login page or electricity query fails: verify the server can reach the WebVPN URLs configured in `CAMPUS_LOGIN_URL` and `CAMPUS_ELECTRICITY_URL`.
+- Enterprise WeChat collection reports `Enterprise WeChat portal is unavailable.`: verify the server can reach the domain configured by `ENTERPRISE_WECHAT_ELECTRICITY_URL` and the `/work/njucm/card.ashx?action=selfhelp_elect_query` query endpoint.
 - Email alerts do not send: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM`, then restart with `docker compose up -d`.

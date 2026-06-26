@@ -123,6 +123,13 @@ class EnterpriseWechatParserTests(unittest.TestCase):
 
         self.assertEqual(diagnosis.kind, "auth_required")
 
+    def test_diagnose_selfhelp_room_not_found_as_query_payload(self):
+        diagnosis = diagnose_enterprise_wechat_response(
+            '{"pass":"1","message":"房间不存在","bankcardbalance":"0","cardbalance":"0","str1":""}'
+        )
+
+        self.assertEqual(diagnosis.kind, "electricity_page")
+
     def test_map_enterprise_wechat_room_fields_accepts_c_building_variants(self):
         expected = {"zone": "C", "house": "20", "room": "2324", "electtype": "1"}
 
@@ -136,8 +143,10 @@ class EnterpriseWechatParserTests(unittest.TestCase):
 
 
 class EnterpriseWechatClientTests(unittest.TestCase):
-    def test_import_cookie_verifies_session_and_saves_authenticated_state(self):
-        opener = FakeWechatOpener(["<html><body>一卡通 宿舍电费</body></html>"])
+    def test_import_cookie_verifies_query_endpoint_and_saves_authenticated_state(self):
+        opener = FakeWechatOpener([
+            '{"pass":"1","message":"房间不存在","bankcardbalance":"0","cardbalance":"0","str1":""}',
+        ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
             client = EnterpriseWechatClient(test_settings(), clock=lambda: "2026-05-30T00:00:00Z")
 
@@ -148,6 +157,13 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(client.last_verified_at, "2026-05-30T00:00:00Z")
         self.assertIsNone(client.last_keep_alive_error)
         self.assertEqual(len(opener.requests), 1)
+        request = opener.requests[0]
+        self.assertEqual(request.full_url, "http://wx.test/work/njucm/card.ashx?action=selfhelp_elect_query")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(
+            parse_qs(request.data.decode("utf-8"), keep_blank_values=True),
+            {"zone": [""], "house": [""], "room": [""], "electtype": ["1"]},
+        )
 
     def test_import_cookie_rejects_empty_unauthenticated_response(self):
         opener = FakeWechatOpener([""])
@@ -161,7 +177,9 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(client.authentication_status, "unauthenticated")
 
     def test_keep_alive_records_success_timestamp_and_clears_error(self):
-        opener = FakeWechatOpener(["<html><body>一卡通 宿舍电费</body></html>"])
+        opener = FakeWechatOpener([
+            '{"pass":"1","message":"房间不存在","bankcardbalance":"0","cardbalance":"0","str1":""}',
+        ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
             client = EnterpriseWechatClient(test_settings(), clock=lambda: "2026-05-30T00:05:00Z")
         client.authenticated = True
@@ -199,9 +217,8 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(status["lastKeepAliveAt"], "2026-05-30T00:05:00Z")
         self.assertIsNone(status["lastKeepAliveError"])
 
-    def test_fetch_reading_posts_verified_selfhelp_elect_query_contract(self):
+    def test_fetch_reading_posts_selfhelp_elect_query_without_page_preflight(self):
         opener = FakeWechatOpener([
-            "<html><body>一卡通 自助购电</body></html>",
             '{"pass": true, "message": "9.5", "bankcardbalance": "0", "cardbalance": "0", "str1": ""}',
         ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
@@ -213,12 +230,8 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(reading.numeric_value, 9.5)
         self.assertEqual(reading.unit, "度")
         self.assertEqual(reading.source, "enterprise_wechat")
-        self.assertEqual(len(opener.requests), 2)
-        self.assertEqual(
-            opener.requests[0].full_url,
-            "http://wx.test/work/njucm/s_card_selfhelp_elect.aspx",
-        )
-        request = opener.requests[1]
+        self.assertEqual(len(opener.requests), 1)
+        request = opener.requests[0]
         self.assertEqual(
             request.full_url,
             "http://wx.test/work/njucm/card.ashx?action=selfhelp_elect_query",
@@ -231,7 +244,6 @@ class EnterpriseWechatClientTests(unittest.TestCase):
 
     def test_fetch_reading_parses_selfhelp_json_even_when_generic_diagnosis_unknown(self):
         opener = FakeWechatOpener([
-            "<html><body>一卡通 自助购电</body></html>",
             '{"pass":1,"message":"12.3","bankcardbalance":0,"cardbalance":0}',
         ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
@@ -240,10 +252,7 @@ class EnterpriseWechatClientTests(unittest.TestCase):
 
         with patch(
             "backend.app.integrations.enterprise_wechat.diagnose_enterprise_wechat_response",
-            side_effect=[
-                diagnose_enterprise_wechat_response("<html><body>一卡通 自助购电</body></html>"),
-                diagnose_enterprise_wechat_response("unrecognized"),
-            ],
+            return_value=diagnose_enterprise_wechat_response("unrecognized"),
         ):
             reading = client.fetch_reading(RoomSelection(building="C20", room="2324"))
 
@@ -253,7 +262,6 @@ class EnterpriseWechatClientTests(unittest.TestCase):
 
     def test_fetch_reading_accepts_numeric_building_and_preserves_room_input(self):
         opener = FakeWechatOpener([
-            "<html><body>一卡通 自助购电</body></html>",
             '{"pass": true, "message": "6.75元", "bankcardbalance": "0", "cardbalance": "0", "str1": ""}',
         ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
@@ -265,10 +273,10 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(reading.numeric_value, 6.75)
         self.assertEqual(reading.unit, "元")
         self.assertEqual(reading.source, "enterprise_wechat")
-        self.assertEqual(parse_qs(opener.requests[1].data.decode("utf-8"))["room"], ["0324"])
+        self.assertEqual(parse_qs(opener.requests[0].data.decode("utf-8"))["room"], ["0324"])
 
     def test_fetch_reading_rejects_unsupported_building_before_query_post(self):
-        opener = FakeWechatOpener(["<html><body>一卡通 自助购电</body></html>"])
+        opener = FakeWechatOpener([])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
             client = EnterpriseWechatClient(test_settings())
         client.authenticated = True
@@ -279,7 +287,7 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(opener.requests, [])
 
     def test_fetch_reading_treats_empty_query_response_as_session_expired(self):
-        opener = FakeWechatOpener(["<html><body>一卡通 自助购电</body></html>", ""])
+        opener = FakeWechatOpener([""])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
             client = EnterpriseWechatClient(test_settings())
         client.authenticated = True
@@ -291,7 +299,7 @@ class EnterpriseWechatClientTests(unittest.TestCase):
         self.assertEqual(client.authentication_status, "session_expired")
 
     def test_fetch_reading_treats_malformed_query_json_as_parse_error(self):
-        opener = FakeWechatOpener(["<html><body>一卡通 自助购电</body></html>", '{"pass":1,'])
+        opener = FakeWechatOpener(['{"pass":1,'])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):
             client = EnterpriseWechatClient(test_settings())
         client.authenticated = True
@@ -303,7 +311,6 @@ class EnterpriseWechatClientTests(unittest.TestCase):
 
     def test_fetch_reading_accepts_false_pass_flag_when_query_message_has_numeric_balance(self):
         opener = FakeWechatOpener([
-            "<html><body>一卡通 自助购电</body></html>",
             '{"pass":0,"message":"7.25","bankcardbalance":0,"cardbalance":0}',
         ])
         with patch("backend.app.integrations.enterprise_wechat.build_opener", return_value=opener):

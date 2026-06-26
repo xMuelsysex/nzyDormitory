@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 import logging
 import mimetypes
+import re
 import threading
 
 from backend.app.alerts.email_alerts import EmailAlertService
@@ -34,6 +35,7 @@ session_keeper = SessionKeeper(portal, repository, alert_service, settings.sessi
 service = MonitorService(repository, portal, scheduler)
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend" / "src"
 READINGS_PAGE_SIZES = {10, 20}
+DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 class DormElectricityHandler(BaseHTTPRequestHandler):
@@ -42,10 +44,10 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
             parsed_url = urlparse(self.path)
             path = parsed_url.path
             if path == "/api/status":
-                send_json(self, 200, service.status())
+                send_json(self, 200, service.status(parse_device_id(parsed_url.query)))
             elif path == "/api/readings":
                 page, page_size = parse_readings_pagination(parsed_url.query)
-                send_json(self, 200, service.readings(page, page_size))
+                send_json(self, 200, service.readings(page, page_size, parse_device_id(parsed_url.query)))
             elif path == "/wechat/guide":
                 send_html(self, 200, build_wechat_guide_html(settings.enterprise_wechat_electricity_url))
             elif path == "/portal/login":
@@ -88,13 +90,13 @@ class DormElectricityHandler(BaseHTTPRequestHandler):
                 send_json(self, 200, {"source": "enterprise_wechat", "authenticationStatus": "unauthenticated"})
                 return
             if path == "/api/room-selection":
-                send_json(self, 200, service.save_room(payload))
+                send_json(self, 200, service.save_room(payload, _required_device_id(payload)))
             elif path == "/api/schedule-config":
-                send_json(self, 200, service.save_schedule(payload))
+                send_json(self, 200, service.save_schedule(payload, _required_device_id(payload)))
             elif path == "/api/alert-config":
-                send_json(self, 200, service.save_alert(payload))
+                send_json(self, 200, service.save_alert(payload, _required_device_id(payload)))
             elif path == "/api/collection/run-once":
-                send_json(self, 200, service.run_once())
+                send_json(self, 200, service.run_once(_required_device_id(payload)))
             else:
                 send_json(self, 404, {"error": {"code": "NOT_FOUND", "message": "Endpoint not found"}})
         except Exception as exc:
@@ -127,6 +129,12 @@ def parse_readings_pagination(query: str) -> tuple[int, int]:
     return page, page_size
 
 
+def parse_device_id(query: str) -> str:
+    params = parse_qs(query, keep_blank_values=True)
+    values = params.get("deviceId")
+    return _validate_device_id(values[-1] if values else "")
+
+
 def _positive_query_int(params: dict[str, list[str]], name: str, default: int) -> int:
     values = params.get(name)
     if not values:
@@ -146,6 +154,19 @@ def _required_string(payload: dict[str, object], field: str) -> str:
     if not value:
         raise ValidationError(f"{field} is required.")
     return value
+
+
+def _required_device_id(payload: dict[str, object]) -> str:
+    return _validate_device_id(str(payload.get("deviceId", "")))
+
+
+def _validate_device_id(value: str) -> str:
+    device_id = value.strip()
+    if not device_id:
+        raise ValidationError("deviceId is required.")
+    if not DEVICE_ID_RE.fullmatch(device_id):
+        raise ValidationError("deviceId is invalid.")
+    return device_id
 
 
 def build_wechat_guide_html(electricity_url: str) -> str:

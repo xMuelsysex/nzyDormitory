@@ -4,7 +4,7 @@ from datetime import datetime
 from io import BytesIO
 from unittest.mock import Mock, patch
 
-from backend.app.main import DormElectricityHandler, FRONTEND_DIR, build_wechat_guide_html, parse_readings_pagination
+from backend.app.main import DormElectricityHandler, FRONTEND_DIR, build_wechat_guide_html, parse_device_id, parse_readings_pagination
 from backend.app.shared.errors import ValidationError
 from backend.app.shared.http import app_now_iso, is_client_disconnect, read_json_body, send_error
 
@@ -247,6 +247,23 @@ class ReadingsPaginationTests(unittest.TestCase):
         for query in ("pageSize=0", "pageSize=15", "pageSize=abc"):
             with self.subTest(query=query), self.assertRaises(ValidationError):
                 parse_readings_pagination(query)
+
+
+class DeviceIdTests(unittest.TestCase):
+    def test_parse_device_id_accepts_generated_browser_id(self):
+        self.assertEqual(parse_device_id("deviceId=device-abc_123:xyz"), "device-abc_123:xyz")
+
+    def test_parse_device_id_requires_value(self):
+        with self.assertRaises(ValidationError) as context:
+            parse_device_id("")
+
+        self.assertEqual(context.exception.message, "deviceId is required.")
+
+    def test_parse_device_id_rejects_control_characters(self):
+        with self.assertRaises(ValidationError) as context:
+            parse_device_id("deviceId=bad%0Avalue")
+
+        self.assertEqual(context.exception.message, "deviceId is invalid.")
 
 
 class JsonBodyTests(unittest.TestCase):

@@ -11,6 +11,13 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass(frozen=True)
+class MonitorProfile:
+    id: int
+    device_id: str
+    label: str | None = None
+
+
+@dataclass(frozen=True)
 class RoomSelection:
     building: str
     room: str

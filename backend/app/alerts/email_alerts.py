@@ -18,27 +18,27 @@ class EmailAlertService:
         self.settings = settings
         self.repository = repository
 
-    def evaluate(self, reading: ElectricityReading) -> bool:
-        config = self.repository.get_alert_config()
+    def evaluate(self, reading: ElectricityReading, profile_id: int | None = None) -> bool:
+        config = self.repository.get_alert_config(profile_id=profile_id)
         if config is None or not config.enabled:
             return False
         if reading.numeric_value >= config.threshold:
             return False
-        if not self._cooldown_elapsed(self.repository.get_last_alert_sent_at(), config.cooldown_seconds):
+        if not self._cooldown_elapsed(self.repository.get_last_alert_sent_at(profile_id=profile_id), config.cooldown_seconds):
             logger.info("alert_skipped_cooldown", extra={"building": reading.building, "room": reading.room})
             return False
         self._send(config, reading)
-        self.repository.mark_alert_sent(reading.collected_at)
+        self.repository.mark_alert_sent(reading.collected_at, profile_id=profile_id)
         return True
 
-    def notify_session_expired(self, occurred_at: str) -> bool:
-        config = self.repository.get_alert_config()
+    def notify_session_expired(self, occurred_at: str, profile_id: int | None = None) -> bool:
+        config = self.repository.get_alert_config(profile_id=profile_id)
         if config is None or not config.enabled:
             return False
         if not self.settings.smtp_host or not self.settings.smtp_from:
             logger.info("session_expired_alert_skipped_smtp_unconfigured")
             return False
-        last_sent = self.repository.get_last_session_expired_alert_sent_at()
+        last_sent = self.repository.get_last_session_expired_alert_sent_at(profile_id=profile_id)
         if not self._cooldown_elapsed(last_sent, config.cooldown_seconds):
             logger.info("session_expired_alert_skipped_cooldown")
             return False
@@ -47,7 +47,7 @@ class EmailAlertService:
         except EmailDeliveryError:
             logger.warning("session_expired_alert_failed", exc_info=True)
             return False
-        self.repository.mark_session_expired_alert_sent(occurred_at)
+        self.repository.mark_session_expired_alert_sent(occurred_at, profile_id=profile_id)
         return True
 
     def _cooldown_elapsed(self, last_sent: str | None, cooldown_seconds: int) -> bool:

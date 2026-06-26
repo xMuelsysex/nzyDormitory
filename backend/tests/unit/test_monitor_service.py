@@ -167,3 +167,48 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual([item["numericValue"] for item in second_page["items"]], [20.0])
         self.assertEqual(out_of_range["items"], [])
         self.assertEqual(out_of_range["total"], 3)
+
+    def test_status_is_scoped_by_device_id(self):
+        service, _ = self.make_service(authenticated=True)
+
+        service.save_room({"building": "C20", "room": "2324"}, "device-a")
+        service.save_room({"building": "C21", "room": "1234"}, "device-b")
+        service.save_schedule(
+            {"intervalSeconds": 60, "startTime": "08:00", "endTime": "22:00", "enabled": True},
+            "device-a",
+        )
+        service.save_schedule(
+            {"intervalSeconds": 300, "startTime": "09:00", "endTime": "21:00", "enabled": False},
+            "device-b",
+        )
+
+        status_a = service.status("device-a")
+        status_b = service.status("device-b")
+
+        self.assertEqual(status_a["roomSelection"], {"building": "C20", "room": "2324"})
+        self.assertEqual(status_b["roomSelection"], {"building": "C21", "room": "1234"})
+        self.assertEqual(status_a["scheduleConfig"]["intervalSeconds"], 60)
+        self.assertEqual(status_b["scheduleConfig"]["intervalSeconds"], 300)
+
+    def test_readings_are_scoped_by_device_id(self):
+        service, _ = self.make_service(authenticated=False)
+        profile_a = service.repository.get_or_create_profile("device-a", "2026-06-26T00:00:00Z")
+        profile_b = service.repository.get_or_create_profile("device-b", "2026-06-26T00:00:00Z")
+        service.repository.insert_reading(
+            ElectricityReading("2026-06-26T00:00:00Z", "C20", "2324", 9.0, "元"),
+            "2026-06-26T00:00:00Z",
+            profile_id=profile_a.id,
+        )
+        service.repository.insert_reading(
+            ElectricityReading("2026-06-26T00:01:00Z", "C21", "1234", 8.0, "元"),
+            "2026-06-26T00:01:00Z",
+            profile_id=profile_b.id,
+        )
+
+        readings_a = service.readings(device_id="device-a")
+        readings_b = service.readings(device_id="device-b")
+
+        self.assertEqual(readings_a["total"], 1)
+        self.assertEqual(readings_b["total"], 1)
+        self.assertEqual(readings_a["items"][0]["room"], "2324")
+        self.assertEqual(readings_b["items"][0]["room"], "1234")

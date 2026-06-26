@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import json
-import mimetypes
 import os
 import re
 import threading
@@ -22,6 +21,7 @@ from backend.app.shared.http import utc_now_iso
 ENTERPRISE_WECHAT_SOURCE = "enterprise_wechat"
 _ELECTRICITY_PAGE_NAME = "s_card_selfhelp_elect.aspx"
 _ELECTRICITY_QUERY_ENDPOINT = "card.ashx?action=selfhelp_elect_query"
+_SELFHELP_SESSION_PROBE_FORM = {"zone": "", "house": "", "room": "", "electtype": "1"}
 
 
 @dataclass(frozen=True)
@@ -88,7 +88,11 @@ class EnterpriseWechatClient:
 
     def verify_session(self) -> bool:
         with self._lock:
-            body = self._fetch_text(self._electricity_page_url())
+            body = self._post_form(
+                self._electricity_query_url(),
+                _SELFHELP_SESSION_PROBE_FORM,
+                self._electricity_page_url(),
+            )
             diagnosis = diagnose_enterprise_wechat_response(body)
             if diagnosis.kind in {"auth_required", "empty"}:
                 self.authenticated = False
@@ -186,11 +190,6 @@ class EnterpriseWechatClient:
                     raise SessionExpiredError("Enterprise WeChat session expired. Please import a fresh session cookie.")
                 raise AuthenticationError("Enterprise WeChat session import is required before collection.")
             query_fields = map_enterprise_wechat_elect_fields(selection)
-            page_body = self._fetch_text(self._electricity_page_url())
-            diagnosis = diagnose_enterprise_wechat_response(page_body)
-            self._raise_for_terminal_diagnosis(diagnosis)
-            if diagnosis.kind == "unknown":
-                raise PortalParseError(diagnosis.message)
             body = self._post_form(self._electricity_query_url(), query_fields.as_form(), self._electricity_page_url())
             diagnosis = diagnose_enterprise_wechat_response(body)
             self._raise_for_terminal_diagnosis(diagnosis)
@@ -236,18 +235,6 @@ class EnterpriseWechatClient:
         code = getattr(error, "code", error.__class__.__name__)
         message = getattr(error, "message", str(error))
         self.last_keep_alive_error = f"{code}: {message}"
-
-    def _fetch_text(self, url: str) -> str:
-        if not _is_allowed_enterprise_wechat_url(url, self.settings.enterprise_wechat_electricity_url):
-            raise PortalFetchError("Enterprise WeChat portal target is not allowed.")
-        try:
-            with self.opener.open(_get_request(url), timeout=15) as response:
-                body = response.read()
-                content_type = response.headers.get("Content-Type") or mimetypes.guess_type(urlparse(url).path)[0] or "text/html"
-                charset = _charset_from_content_type(content_type)
-        except OSError as exc:
-            raise PortalFetchError("Enterprise WeChat portal is unavailable.") from exc
-        return body.decode(charset, errors="ignore")
 
     def _post_form(self, url: str, fields: dict[str, str], referer: str) -> str:
         if not _is_allowed_enterprise_wechat_url(url, self.settings.enterprise_wechat_electricity_url):
@@ -438,8 +425,26 @@ def _looks_like_electricity_payload(body: str, text: str) -> bool:
         if _parse_json_electricity_value(body, selfhelp_query=True) is not None:
             return True
     except PortalParseError:
+        if _looks_like_selfhelp_query_payload(body):
+            return True
         return False
     return any(token in text for token in ("电费余额", "剩余电费", "宿舍电费", "当前电量", "剩余电量"))
+
+
+def _looks_like_selfhelp_query_payload(body: str) -> bool:
+    stripped = body.strip().lstrip("\ufeff")
+    if not stripped.startswith("{"):
+        return False
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    normalized_keys = {str(key).lower() for key in payload}
+    return "message" in normalized_keys and bool(
+        normalized_keys.intersection({"pass", "bankcardbalance", "cardbalance", "str1"})
+    )
 
 
 def _visible_text(page_html: str) -> str:
@@ -450,16 +455,6 @@ def _is_allowed_enterprise_wechat_url(target: str, base_url: str) -> bool:
     parsed_target = urlparse(target)
     parsed_base = urlparse(base_url)
     return parsed_target.scheme in {"http", "https"} and parsed_target.netloc == parsed_base.netloc
-
-
-def _get_request(url: str) -> Request:
-    return Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 DormElectricityMonitor/1.0",
-            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        },
-    )
 
 
 def _post_request(url: str, fields: dict[str, str], referer: str) -> Request:

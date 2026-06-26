@@ -98,3 +98,28 @@ class EmailAlertServiceTests(unittest.TestCase):
 
         self.assertFalse(service.notify_session_expired("2026-05-13T01:00:00Z"))
         self.assertIsNone(self.repository.get_last_session_expired_alert_sent_at())
+
+    def test_low_balance_cooldown_is_profile_scoped(self):
+        second_profile = self.repository.get_or_create_profile("device-b", "2026-06-26T00:00:00Z")
+        self.repository.save_alert_config(
+            AlertConfig(threshold=10.0, recipient_email="second@test", enabled=True, cooldown_seconds=3600),
+            "2026-06-26T00:00:00Z",
+            profile_id=second_profile.id,
+        )
+        self.repository.mark_alert_sent("2026-06-26T00:30:00Z")
+        reading = ElectricityReading(
+            collected_at="2026-06-26T01:00:00Z",
+            building="C21",
+            room="1234",
+            numeric_value=5.0,
+            unit="元",
+        )
+
+        with patch("backend.app.alerts.email_alerts.smtplib.SMTP", FakeSMTP):
+            sent = self.service.evaluate(reading, second_profile.id)
+
+        self.assertTrue(sent)
+        self.assertEqual(len(FakeSMTP.sent_messages), 1)
+        self.assertEqual(FakeSMTP.sent_messages[0]["To"], "second@test")
+        self.assertEqual(self.repository.get_last_alert_sent_at(), "2026-06-26T00:30:00Z")
+        self.assertEqual(self.repository.get_last_alert_sent_at(profile_id=second_profile.id), "2026-06-26T01:00:00Z")
